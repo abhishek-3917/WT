@@ -1,0 +1,21 @@
+{
+  "name": "cinesync",
+  "version": "1.0.0",
+  "description": "Watch movies and series together with real-time sync, WebRTC video/voice chat, and integrated search engine.",
+  "scripts": {
+    "postinstall": "npm --prefix client install && npm --prefix server install",
+    "build": "npm --prefix client run build",
+    "start": "node server/server.js",
+    "server": "node server/server.js",
+    "client": "npm --prefix client run dev",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,magenta\" \"node server/server.js\" \"npm --prefix client run dev\""
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
