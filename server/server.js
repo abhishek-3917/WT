@@ -4,6 +4,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { CURATED_MOVIES } = require('./moviesData');
+const storage = require('./storage');
 
 const app = express();
 const server = http.createServer(app);
@@ -75,7 +76,7 @@ app.all('/assets/*', async (req, res) => {
 
 // Dynamic API forwarder for embedded web apps like 7reels when they call relative /api/*
 app.use('/api', async (req, res, next) => {
-  const knownPrefixes = ['/health', '/search', '/resolve-stream', '/rooms', '/stream-proxy', '/tv-details', '/tv-season'];
+  const knownPrefixes = ['/health', '/search', '/resolve-stream', '/rooms', '/stream-proxy', '/tv-details', '/tv-season', '/auth', '/user'];
   if (knownPrefixes.some(p => req.path.startsWith(p))) {
     return next();
   }
@@ -765,6 +766,136 @@ app.get('/api/search', async (req, res) => {
   res.json(results);
 });
 
+// Helper to broadcast and persist system messages in room chat history
+function broadcastSystemMessage(roomId, text, type = 'system') {
+  const room = rooms.get(roomId);
+  const sysMsg = {
+    id: `sys-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    text,
+    timestamp: Date.now(),
+    type,
+    isSystem: true
+  };
+  if (room) {
+    if (!room.messages) room.messages = [];
+    room.messages.push(sysMsg);
+    storage.saveRoomMessage(roomId, sysMsg);
+  }
+  io.to(roomId).emit('system_message', sysMsg);
+  return sysMsg;
+}
+
+// ==========================================
+// AUTHENTICATION ENDPOINTS (SIGNUP / SIGNIN)
+// ==========================================
+
+// Sign Up: Unique username & alphanumeric with @ password
+app.post('/api/auth/signup', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+    const user = storage.createUser(username, password);
+    const token = storage.createSessionToken(user);
+    console.log(`[Auth] New user signed up: ${user.username} (${user.id})`);
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Sign In
+app.post('/api/auth/signin', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+    const user = storage.authenticateUser(username, password);
+    const token = storage.createSessionToken(user);
+    console.log(`[Auth] User signed in: ${user.username}`);
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Current User Session verification
+app.get('/api/auth/me', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (req.query.token || req.headers['x-auth-token']);
+    const user = storage.getUserFromToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Session expired or invalid.' });
+    }
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// WATCH HISTORY ENDPOINTS
+// ==========================================
+
+// Get Watch History
+app.get('/api/user/history', (req, res) => {
+  try {
+    const identifier = req.query.userId || req.query.username;
+    if (!identifier) {
+      return res.status(400).json({ error: 'Missing userId or username parameter.' });
+    }
+    const history = storage.getWatchHistory(identifier);
+    res.json({ success: true, history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add Item to Watch History
+app.post('/api/user/history', (req, res) => {
+  try {
+    const { userId, username, item } = req.body;
+    const identifier = userId || username;
+    if (!identifier || !item) {
+      return res.status(400).json({ error: 'Missing user identifier or media item.' });
+    }
+    const history = storage.addWatchHistory(identifier, item);
+    res.json({ success: true, history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete Item from Watch History
+app.delete('/api/user/history', (req, res) => {
+  try {
+    const identifier = req.body.userId || req.body.username || req.query.userId || req.query.username;
+    const historyId = req.body.historyId || req.query.historyId;
+    if (!identifier) {
+      return res.status(400).json({ error: 'Missing user identifier.' });
+    }
+    const history = storage.removeWatchHistoryItem(identifier, historyId);
+    res.json({ success: true, history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Room Chat History Endpoint
+app.get('/api/rooms/:roomId/messages', (req, res) => {
+  try {
+    const roomId = req.params.roomId.toUpperCase();
+    const room = rooms.get(roomId);
+    const messages = room?.messages || storage.getRoomChat(roomId) || [];
+    res.json({ success: true, messages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Room details endpoint
 app.get('/api/rooms/:roomId', (req, res) => {
   const room = rooms.get(req.params.roomId.toUpperCase());
@@ -790,7 +921,7 @@ io.on('connection', (socket) => {
   socket.on('create_room', ({ hostName, roomTitle, settings, initialMedia }, callback) => {
     try {
       const roomId = generateRoomCode();
-      const defaultMedia = initialMedia || CURATED_MOVIES.find(m => m.id === 'oceans') || CURATED_MOVIES.find(m => m.type === 'video') || CURATED_MOVIES[0];
+      const defaultMedia = initialMedia || null;
 
       const room = {
         id: roomId,
@@ -807,7 +938,7 @@ io.on('connection', (socket) => {
           allowVideoAudio: settings?.allowVideoAudio !== false,
           requireSyncApproval: false
         },
-        media: {
+        media: defaultMedia ? {
           id: defaultMedia.id,
           title: defaultMedia.title,
           url: defaultMedia.url,
@@ -817,7 +948,8 @@ io.on('connection', (socket) => {
           isPlaying: false,
           playbackRate: 1.0,
           lastUpdated: Date.now()
-        },
+        } : null,
+        messages: storage.getRoomChat(roomId) || [],
         members: new Map()
       };
 
@@ -836,13 +968,14 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       socket.currentRoomId = roomId;
 
-      console.log(`[Room Created] ${roomId} by ${hostName} (${socket.id})`);
+      console.log(`[Room Created] ${roomId} by ${hostName} (${socket.id}) - Media: ${defaultMedia ? defaultMedia.title : 'None (Host will pick from Catalog)'}`);
 
       if (typeof callback === 'function') {
         callback({
           success: true,
           roomId,
           room: serializeRoom(room),
+          messages: room.messages,
           user: hostMember
         });
       }
@@ -881,9 +1014,13 @@ io.on('connection', (socket) => {
 
       console.log(`[User Joined] ${member.name} (${socket.id}) joined ${normalizedRoomId}`);
 
+      if (!room.messages) {
+        room.messages = storage.getRoomChat(normalizedRoomId) || [];
+      }
+
       // Calculate current approximate timestamp if playing
-      let currentPosition = room.media.currentTime;
-      if (room.media.isPlaying) {
+      let currentPosition = room.media ? room.media.currentTime : 0;
+      if (room.media && room.media.isPlaying) {
         const elapsedSec = (Date.now() - room.media.lastUpdated) / 1000;
         currentPosition += elapsedSec * (room.media.playbackRate || 1);
       }
@@ -900,24 +1037,23 @@ io.on('connection', (socket) => {
         count: room.members.size
       });
 
-      // System notification in chat
-      io.to(normalizedRoomId).emit('system_message', {
-        id: `sys-${Date.now()}-${Math.random()}`,
-        text: `${member.name} joined the room.`,
-        timestamp: Date.now(),
-        type: 'join'
-      });
+      // System notification in chat with persistence
+      broadcastSystemMessage(normalizedRoomId, `${member.name} joined the room.`, 'join');
+
+      // Send existing chat history to the newly connected participant
+      socket.emit('chat_history', room.messages);
 
       if (typeof callback === 'function') {
         callback({
           success: true,
           room: {
             ...serializeRoom(room),
-            media: {
+            media: room.media ? {
               ...room.media,
               currentTime: currentPosition
-            }
+            } : null
           },
+          messages: room.messages,
           user: member
         });
       }
@@ -939,12 +1075,7 @@ io.on('connection', (socket) => {
     room.settings = { ...room.settings, ...settings };
     io.to(roomId).emit('room_settings_updated', { settings: room.settings });
     
-    io.to(roomId).emit('system_message', {
-      id: `sys-${Date.now()}`,
-      text: `Host updated room settings (Control: ${room.settings.controlMode}).`,
-      timestamp: Date.now(),
-      type: 'settings'
-    });
+    broadcastSystemMessage(roomId, `Host updated room settings (Control: ${room.settings.controlMode}).`, 'settings');
 
     if (typeof callback === 'function') callback({ success: true, settings: room.settings });
   });
@@ -982,12 +1113,7 @@ io.on('connection', (socket) => {
       passedBy: senderName
     });
 
-    io.to(roomId).emit('system_message', {
-      id: `sys-${Date.now()}`,
-      text: `🎮 ${senderName} passed the Remote to ${targetMember.name}!`,
-      timestamp: Date.now(),
-      type: 'remote_transfer'
-    });
+    broadcastSystemMessage(roomId, `🎮 ${senderName} passed the Remote to ${targetMember.name}!`, 'remote_transfer');
   });
 
   // Request the Remote
@@ -1004,18 +1130,13 @@ io.on('connection', (socket) => {
       requesterName: senderName
     });
 
-    io.to(roomId).emit('system_message', {
-      id: `sys-${Date.now()}`,
-      text: `🙋 ${senderName} requested the Virtual Remote!`,
-      timestamp: Date.now(),
-      type: 'remote_request'
-    });
+    broadcastSystemMessage(roomId, `🙋 ${senderName} requested the Virtual Remote!`, 'remote_request');
   });
 
   // Media Play
   socket.on('media_play', ({ roomId, currentTime }) => {
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room || !room.media) return;
 
     // Check control permissions via Virtual Remote
     if (!hasPlaybackControl(room, socket.id)) {
@@ -1040,7 +1161,7 @@ io.on('connection', (socket) => {
   // Media Pause
   socket.on('media_pause', ({ roomId, currentTime }) => {
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room || !room.media) return;
 
     if (!hasPlaybackControl(room, socket.id)) {
       return socket.emit('error_notification', 'You need the Virtual Remote to pause playback.');
@@ -1063,7 +1184,7 @@ io.on('connection', (socket) => {
   // Media Seek
   socket.on('media_seek', ({ roomId, currentTime }) => {
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room || !room.media) return;
 
     if (!hasPlaybackControl(room, socket.id)) {
       return socket.emit('error_notification', 'You need the Virtual Remote to seek playback.');
@@ -1086,7 +1207,7 @@ io.on('connection', (socket) => {
   // Media Playback Rate / Speed Change
   socket.on('media_rate_change', ({ roomId, playbackRate }) => {
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room || !room.media) return;
 
     if (!hasPlaybackControl(room, socket.id)) {
       return socket.emit('error_notification', 'You need the Virtual Remote to change playback speed.');
@@ -1202,12 +1323,7 @@ io.on('connection', (socket) => {
     });
 
     const epDisplay = isTv && season && episode ? ` (S${season}:E${episode}${media.episodeTitle ? ` - ${media.episodeTitle}` : ''})` : '';
-    io.to(roomId).emit('system_message', {
-      id: `sys-${Date.now()}`,
-      text: `${member?.name || 'Host'} started playing "${media.title}"${epDisplay}.`,
-      timestamp: Date.now(),
-      type: 'media_change'
-    });
+    broadcastSystemMessage(roomId, `${member?.name || 'Host'} started playing "${media.title}"${epDisplay}.`, 'media_change');
   });
 
   // Request Sync (Participant requests current exact timestamp & status from host/server)
@@ -1217,9 +1333,9 @@ io.on('connection', (socket) => {
 
     const member = room.members.get(socket.id);
 
-    // Compute live timestamp
-    let liveCurrentTime = room.media.currentTime;
-    if (room.media.isPlaying) {
+    // Compute live timestamp safely
+    let liveCurrentTime = room.media ? room.media.currentTime : 0;
+    if (room.media && room.media.isPlaying) {
       const elapsedSec = (Date.now() - room.media.lastUpdated) / 1000;
       liveCurrentTime += elapsedSec * (room.media.playbackRate || 1);
     }
@@ -1229,8 +1345,8 @@ io.on('connection', (socket) => {
     // Reply directly to requesting socket
     socket.emit('sync_state', {
       currentTime: liveCurrentTime,
-      isPlaying: room.media.isPlaying,
-      media: room.media,
+      isPlaying: room.media ? room.media.isPlaying : false,
+      media: room.media ? room.media : null,
       serverTime: Date.now()
     });
 
@@ -1243,7 +1359,7 @@ io.on('connection', (socket) => {
   // Host or Remote Holder heartbeat (Periodically updates accurate playback status)
   socket.on('host_heartbeat', ({ roomId, currentTime, isPlaying }) => {
     const room = rooms.get(roomId);
-    if (!room || !hasPlaybackControl(room, socket.id)) return;
+    if (!room || !room.media || !hasPlaybackControl(room, socket.id)) return;
 
     room.media.currentTime = currentTime;
     room.media.isPlaying = isPlaying;
@@ -1308,6 +1424,10 @@ io.on('connection', (socket) => {
       timestamp: Date.now()
     };
 
+    if (!room.messages) room.messages = [];
+    room.messages.push(message);
+    storage.saveRoomMessage(roomId, message);
+
     io.to(roomId).emit('new_chat_message', message);
   });
 
@@ -1361,12 +1481,7 @@ io.on('connection', (socket) => {
             newHostName: nextHost.name
           });
 
-          io.to(roomId).emit('system_message', {
-            id: `sys-${Date.now()}`,
-            text: `${nextHost.name} is now the host.`,
-            timestamp: Date.now(),
-            type: 'host_transfer'
-          });
+          broadcastSystemMessage(roomId, `${nextHost.name} is now the host.`, 'host_transfer');
         }
       }
 
@@ -1397,12 +1512,7 @@ io.on('connection', (socket) => {
         count: room.members.size
       });
 
-      io.to(roomId).emit('system_message', {
-        id: `sys-${Date.now()}`,
-        text: `${memberName} left the room.`,
-        timestamp: Date.now(),
-        type: 'leave'
-      });
+      broadcastSystemMessage(roomId, `${memberName} left the room.`, 'leave');
     }
   });
 });
@@ -1421,7 +1531,8 @@ function serializeRoom(room) {
     remoteControllerName: room.remoteControllerName || room.hostName,
     createdAt: room.createdAt,
     settings: room.settings,
-    media: room.media,
+    media: room.media ? { ...room.media } : null,
+    messages: room.messages || [],
     members: membersList
   };
 }

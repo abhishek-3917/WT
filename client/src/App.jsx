@@ -9,11 +9,12 @@ import VideoChatGrid from './components/Chat/VideoChatGrid';
 import TextChatPanel from './components/Chat/TextChatPanel';
 import HostSettingsModal from './components/Room/HostSettingsModal';
 import InviteModal from './components/Room/InviteModal';
+import AuthModal from './components/Auth/AuthModal';
 
 import { 
   Tv, Search, MessageSquare, Video, Settings, Share2, 
   LogOut, Users, Sparkles, ChevronRight, ChevronLeft, 
-  Shield, RefreshCw, Gamepad2, Film, Play, Compass, ExternalLink
+  Shield, RefreshCw, Gamepad2, Film, Play, Compass, ExternalLink, User
 } from 'lucide-react';
 
 export default function App() {
@@ -27,6 +28,107 @@ export default function App() {
   const [remoteNotice, setRemoteNotice] = useState(null);
   const [messages, setMessages] = useState([]);
   const [reactions, setReactions] = useState([]);
+
+  // Account and Auth state
+  const [accountUser, setAccountUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cinesync_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch(e) {
+      return null;
+    }
+  });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Watch History state
+  const [watchHistory, setWatchHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cinesync_watch_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch(e) {
+      return [];
+    }
+  });
+
+  // Verify auth session token on mount
+  useEffect(() => {
+    const token = localStorage.getItem('cinesync_token');
+    if (token) {
+      fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.user) {
+          setAccountUser(data.user);
+          localStorage.setItem('cinesync_user', JSON.stringify(data.user));
+          if (Array.isArray(data.user.watchHistory) && data.user.watchHistory.length > 0) {
+            setWatchHistory(data.user.watchHistory);
+            localStorage.setItem('cinesync_watch_history', JSON.stringify(data.user.watchHistory));
+          }
+        }
+      })
+      .catch(console.warn);
+    }
+  }, []);
+
+  // Record item into watch history (both server + localStorage)
+  const recordWatchHistory = useCallback((mediaItem) => {
+    if (!mediaItem || !mediaItem.title || mediaItem.type === 'none') return;
+    const historyItem = {
+      id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: mediaItem.title,
+      tmdbId: mediaItem.tmdbId || null,
+      isTv: Boolean(mediaItem.isTv),
+      season: mediaItem.season || null,
+      episode: mediaItem.episode || null,
+      episodeTitle: mediaItem.episodeTitle || null,
+      thumbnail: mediaItem.thumbnail || mediaItem.backdrop || null,
+      url: mediaItem.url || '',
+      source: mediaItem.source || 'CineSync',
+      type: mediaItem.type || 'hls',
+      watchedAt: Date.now()
+    };
+
+    setWatchHistory((prev) => {
+      const filtered = prev.filter(h => {
+        if (historyItem.isTv) {
+          return !(h.tmdbId === historyItem.tmdbId && h.season === historyItem.season && h.episode === historyItem.episode);
+        }
+        return !(h.tmdbId && historyItem.tmdbId ? h.tmdbId === historyItem.tmdbId : h.title.toLowerCase() === historyItem.title.toLowerCase());
+      });
+      const updated = [historyItem, ...filtered].slice(0, 60);
+      localStorage.setItem('cinesync_watch_history', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (accountUser?.id) {
+      fetch('/api/user/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: accountUser.id, item: historyItem })
+      }).catch(console.warn);
+    }
+  }, [accountUser?.id]);
+
+  const handleClearWatchHistory = () => {
+    setWatchHistory([]);
+    localStorage.removeItem('cinesync_watch_history');
+    if (accountUser?.id) {
+      fetch('/api/user/history', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: accountUser.id })
+      }).catch(console.warn);
+    }
+  };
+
+  // Cache room chat messages to localStorage to keep chat history safe
+  useEffect(() => {
+    if (room?.id && messages.length > 0) {
+      localStorage.setItem('cinesync_chat_' + room.id, JSON.stringify(messages));
+    }
+  }, [room?.id, messages]);
 
   // WebRTC hook for peer-to-peer audio and video
   const {
@@ -47,15 +149,40 @@ export default function App() {
     setRoom(roomData);
     setCurrentUser(userData);
 
-    // Initial system greeting in Scener style
-    setMessages([
-      {
-        id: `sys-welcome-${Date.now()}`,
-        text: `Welcome to "${roomData.title}"! Scener Virtual Theater is live. Room Code: ${roomData.id}`,
-        timestamp: Date.now(),
-        isSystem: true
+    // Requirement 2: After creating room directly open the catalog for the host to search and play desired one!
+    if (userData?.isHost || !roomData.media?.url) {
+      setActiveSideTab('search');
+      setIsSidebarOpen(true);
+    }
+
+    // Keep Chat History: Load existing room chat messages or restore from local cache
+    if (Array.isArray(roomData.messages) && roomData.messages.length > 0) {
+      setMessages(roomData.messages);
+    } else {
+      const cachedChat = localStorage.getItem('cinesync_chat_' + roomData.id);
+      if (cachedChat) {
+        try {
+          const parsed = JSON.parse(cachedChat);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+          }
+        } catch(e) {}
+      } else {
+        setMessages([
+          {
+            id: `sys-welcome-${Date.now()}`,
+            text: `Welcome to "${roomData.title}"! Scener Virtual Theater is live. Room Code: ${roomData.id}`,
+            timestamp: Date.now(),
+            isSystem: true
+          }
+        ]);
       }
-    ]);
+    }
+
+    // If room already has active media, record in watch history
+    if (roomData.media && roomData.media.url) {
+      recordWatchHistory(roomData.media);
+    }
 
     // Automatically prompt media stream if enabled
     if (roomData.settings.allowVideoAudio) {
@@ -75,6 +202,16 @@ export default function App() {
     // Media changed (Host or Remote holder switched movie/platform)
     const handleMediaChanged = ({ media, triggeredBy }) => {
       setRoom((prev) => (prev ? { ...prev, media } : prev));
+      if (media && media.url) {
+        recordWatchHistory(media);
+      }
+    };
+
+    // Chat history received on join/resync
+    const handleChatHistory = (history) => {
+      if (Array.isArray(history) && history.length > 0) {
+        setMessages(history);
+      }
     };
 
     // Chat messages
@@ -150,6 +287,7 @@ export default function App() {
 
     socket.on('room_settings_updated', handleSettingsUpdated);
     socket.on('media_changed', handleMediaChanged);
+    socket.on('chat_history', handleChatHistory);
     socket.on('new_chat_message', handleNewChatMessage);
     socket.on('system_message', handleSystemMessage);
     socket.on('floating_reaction', handleFloatingReaction);
@@ -163,6 +301,7 @@ export default function App() {
     return () => {
       socket.off('room_settings_updated', handleSettingsUpdated);
       socket.off('media_changed', handleMediaChanged);
+      socket.off('chat_history', handleChatHistory);
       socket.off('new_chat_message', handleNewChatMessage);
       socket.off('system_message', handleSystemMessage);
       socket.off('floating_reaction', handleFloatingReaction);
@@ -173,7 +312,7 @@ export default function App() {
       socket.off('remote_transferred', handleRemoteTransferred);
       socket.off('remote_requested', handleRemoteRequested);
     };
-  }, [room?.id, currentUser]);
+  }, [room?.id, currentUser, recordWatchHistory]);
 
   // Send emoji reaction
   const handleSendReaction = (emoji) => {
@@ -319,7 +458,25 @@ export default function App() {
 
   // If not yet in a room, render Lobby
   if (!room) {
-    return <Lobby onRoomJoined={handleRoomJoined} />;
+    return (
+      <>
+        <Lobby 
+          onRoomJoined={handleRoomJoined} 
+          accountUser={accountUser}
+          onOpenAuthModal={() => setShowAuthModal(true)}
+        />
+        {showAuthModal && (
+          <AuthModal
+            isOpen={showAuthModal}
+            onClose={() => setShowAuthModal(false)}
+            currentUser={accountUser}
+            watchHistory={watchHistory}
+            onAuthSuccess={(u) => setAccountUser(u)}
+            onSignOut={() => setAccountUser(null)}
+          />
+        )}
+      </>
+    );
   }
 
   const isHost = currentUser?.isHost;
@@ -442,6 +599,29 @@ export default function App() {
 
         {/* Right: Actions & Tools */}
         <div className="flex items-center space-x-2">
+          {/* Account Profile / Auth Button */}
+          {accountUser ? (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 hover:border-indigo-500/50 text-xs font-semibold text-white transition cursor-pointer shadow"
+              title={`Signed in as @${accountUser.username} - View Account & History`}
+            >
+              <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-bold">
+                {accountUser.username?.[0]?.toUpperCase()}
+              </div>
+              <span className="hidden sm:inline">@{accountUser.username}</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition cursor-pointer active:scale-95 shadow"
+              title="Sign In or Create Account"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign In</span>
+            </button>
+          )}
+
           {/* Scener Popcorn Burst Button */}
           <button
             onClick={() => handleSendReaction('🍿')}
@@ -494,6 +674,10 @@ export default function App() {
               currentUser={currentUser}
               members={memberList}
               onRequestSync={handleRequestSync}
+              onOpenCatalog={() => {
+                setActiveSideTab('search');
+                setIsSidebarOpen(true);
+              }}
               reactions={reactions}
               isScreenSharing={isScreenSharing}
               localStream={localStream}
@@ -672,6 +856,9 @@ export default function App() {
               <SearchEngineTab
                 room={room}
                 currentUser={currentUser}
+                watchHistory={watchHistory}
+                onClearHistory={handleClearWatchHistory}
+                accountUser={accountUser}
                 onClose={() => setActiveSideTab('chat')}
                 onStartTabBroadcast={(platformName) => toggleScreenShare()}
               />
@@ -692,6 +879,37 @@ export default function App() {
         <InviteModal
           room={room}
           onClose={() => setShowInviteModal(false)}
+        />
+      )}
+
+      {showAuthModal && (
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          currentUser={accountUser}
+          watchHistory={watchHistory}
+          onAuthSuccess={(u) => setAccountUser(u)}
+          onSignOut={() => setAccountUser(null)}
+          onPlayHistoryItem={(item) => {
+            socket.emit('media_change', {
+              roomId: room.id,
+              media: {
+                id: item.isTv ? `media-${item.tmdbId}-s${item.season}e${item.episode}-${Date.now()}` : (item.id || `media-${Date.now()}`),
+                title: item.title,
+                url: item.url,
+                type: item.type || 'hls',
+                tmdbId: item.tmdbId || null,
+                isTv: item.isTv,
+                season: item.season,
+                episode: item.episode,
+                episodeTitle: item.episodeTitle,
+                thumbnail: item.thumbnail,
+                source: item.source,
+                currentTime: 0,
+                isPlaying: true
+              }
+            });
+          }}
         />
       )}
     </div>

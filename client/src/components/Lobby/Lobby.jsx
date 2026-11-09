@@ -2,21 +2,26 @@ import React, { useState, useEffect } from 'react';
 import socket from '../../services/socket';
 import { 
   Tv, Sparkles, Users, Video, Mic, Search, Shield, 
-  ArrowRight, Film, Play, Compass, RefreshCw, AlertCircle
+  ArrowRight, Film, Play, Compass, RefreshCw, AlertCircle, User
 } from 'lucide-react';
 
-export default function Lobby({ onRoomJoined }) {
+export default function Lobby({ onRoomJoined, accountUser, onOpenAuthModal }) {
   const [mode, setMode] = useState('create'); // 'create' | 'join'
-  const [name, setName] = useState('');
+  const [name, setName] = useState(accountUser?.username || '');
   const [roomTitle, setRoomTitle] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [controlMode, setControlMode] = useState('host-only');
   const [allowChat, setAllowChat] = useState(true);
   const [allowVideoAudio, setAllowVideoAudio] = useState(true);
-  const [selectedInitialMovie, setSelectedInitialMovie] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [featuredMovies, setFeaturedMovies] = useState([]);
+
+  // Auto-fill username if accountUser changes
+  useEffect(() => {
+    if (accountUser?.username && !name) {
+      setName(accountUser.username);
+    }
+  }, [accountUser]);
 
   // Check URL parameters for ?room=...
   useEffect(() => {
@@ -26,24 +31,13 @@ export default function Lobby({ onRoomJoined }) {
       setRoomCode(urlRoom.toUpperCase());
       setMode('join');
     }
-
-    // Fetch featured movies for initial preview selection
-    fetch('/api/search?category=all')
-      .then(res => res.json())
-      .then(data => {
-        setFeaturedMovies(data.slice(0, 4));
-        if (data.length > 0) {
-          setSelectedInitialMovie(data[0]);
-        }
-      })
-      .catch(console.error);
   }, []);
 
   const handleCreateRoom = (e) => {
     e.preventDefault();
     setError('');
 
-    const hostName = name.trim() || 'Host';
+    const hostName = name.trim() || accountUser?.username || 'Host';
     setLoading(true);
 
     socket.emit('create_room', {
@@ -53,8 +47,7 @@ export default function Lobby({ onRoomJoined }) {
         controlMode,
         allowChat,
         allowVideoAudio
-      },
-      initialMedia: selectedInitialMovie
+      }
     }, (res) => {
       setLoading(false);
       if (res?.success) {
@@ -117,9 +110,33 @@ export default function Lobby({ onRoomJoined }) {
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Sync Engine Active</span>
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 hidden sm:flex">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Sync Engine Active</span>
+          </div>
+
+          {accountUser ? (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 hover:border-indigo-500/50 text-xs font-semibold text-white transition cursor-pointer shadow"
+            >
+              <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-bold">
+                {accountUser.username?.[0]?.toUpperCase()}
+              </div>
+              <span>@{accountUser.username}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs font-semibold transition cursor-pointer active:scale-95 shadow"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Sign In / Sign Up</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -260,38 +277,6 @@ export default function Lobby({ onRoomJoined }) {
                   </button>
                 </div>
               </div>
-
-              {/* Starting Movie Picker */}
-              {featuredMovies.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    Initial Movie / Stream
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {featuredMovies.slice(0, 2).map((m) => (
-                      <div
-                        key={m.id}
-                        onClick={() => setSelectedInitialMovie(m)}
-                        className={`p-2 rounded-xl border cursor-pointer flex items-center space-x-2 transition ${
-                          selectedInitialMovie?.id === m.id
-                            ? 'border-indigo-500 bg-indigo-950/40 text-white'
-                            : 'border-white/5 bg-slate-950 text-slate-400 hover:border-white/20'
-                        }`}
-                      >
-                        <img
-                          src={m.thumbnail}
-                          alt={m.title}
-                          className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
-                        />
-                        <div className="truncate text-xs font-semibold">
-                          <div className="truncate">{m.title}</div>
-                          <div className="text-[10px] text-slate-400">{m.genre.split('/')[0]}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <button
                 type="submit"

@@ -8,7 +8,7 @@ import {
   Radio, Globe, Compass, Timer, Copy, Check, Zap, Languages,
   Mic, MicOff, Video, VideoOff, User, Crown, Key, Lock,
   ChevronDown, ChevronUp, Camera, CameraOff, X, GripHorizontal, Move,
-  List, SkipForward, Layers
+  List, SkipForward, Layers, Search
 } from 'lucide-react';
 
 export default function SyncedPlayer({ 
@@ -16,6 +16,7 @@ export default function SyncedPlayer({
   currentUser, 
   members = [],
   onRequestSync, 
+  onOpenCatalog = null,
   reactions = [],
   isScreenSharing = false,
   localStream = null,
@@ -2234,12 +2235,25 @@ export default function SyncedPlayer({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center p-12 text-slate-400">
-          <Film className="w-16 h-16 mb-4 text-indigo-400 animate-pulse" />
-          <h3 className="text-xl font-bold text-white mb-2">No Movie Selected</h3>
-          <p className="text-sm max-w-md text-center text-slate-400">
-            Open the <strong className="text-indigo-300">Search Engine Tab</strong> to pick Netflix, Hotstar, Prime, 1Fmovies, or catalog movies.
-          </p>
+        <div className="flex flex-col items-center justify-center p-12 text-slate-400 space-y-4 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-xl">
+            <Film className="w-8 h-8 animate-pulse" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-xl font-black text-white tracking-wide">Theater Ready</h3>
+            <p className="text-xs max-w-sm text-slate-400">
+              No movie is currently playing. Search and select any movie or series to stream together in synchronized lockstep.
+            </p>
+          </div>
+          {onOpenCatalog && (
+            <button
+              onClick={onOpenCatalog}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center space-x-2 transition cursor-pointer active:scale-95"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Browse Catalog & Search</span>
+            </button>
+          )}
         </div>
       )}
 

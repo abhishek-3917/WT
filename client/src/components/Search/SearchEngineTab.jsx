@@ -4,7 +4,7 @@ import {
   Search, Film, Globe, Play, CheckCircle, 
   Sparkles, ExternalLink, SlidersHorizontal, AlertCircle,
   Tv, Monitor, Radio, Compass, RefreshCw, X, List, ChevronRight,
-  Layers, Loader2, ArrowLeft
+  Layers, Loader2, ArrowLeft, Clock, Trash2
 } from 'lucide-react';
 
 const YoutubeIcon = ({ className = "w-3 h-3" }) => (
@@ -17,7 +17,10 @@ export default function SearchEngineTab({
   room, 
   currentUser, 
   onClose,
-  onStartTabBroadcast 
+  onStartTabBroadcast,
+  watchHistory = [],
+  onClearHistory = null,
+  accountUser = null
 }) {
   const [activeSubTab, setActiveSubTab] = useState('browse'); // 'browse' | 'platforms' | 'custom-link'
   const [query, setQuery] = useState('');
@@ -408,6 +411,20 @@ export default function SearchEngineTab({
               }`}
             >
               URL
+            </button>
+            <button
+              onClick={() => setActiveSubTab('history')}
+              className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center space-x-1 ${
+                activeSubTab === 'history' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clock className="w-3 h-3" />
+              <span>History</span>
+              {watchHistory?.length > 0 && (
+                <span className="text-[10px] px-1 py-0.2 rounded-full bg-white/20 text-white font-bold ml-0.5">
+                  {watchHistory.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -921,6 +938,123 @@ export default function SearchEngineTab({
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* SUBTAB 4: WATCH HISTORY */}
+      {activeSubTab === 'history' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex items-center justify-between pb-1 border-b border-white/5">
+            <div className="flex items-center space-x-2">
+              <Clock className="w-4 h-4 text-indigo-400" />
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                Watch History ({watchHistory?.length || 0})
+              </h3>
+            </div>
+            {watchHistory?.length > 0 && onClearHistory && (
+              <button
+                onClick={onClearHistory}
+                className="flex items-center space-x-1 text-[11px] text-slate-400 hover:text-red-400 transition cursor-pointer p-1 rounded-lg hover:bg-white/5"
+                title="Clear all watch history"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
+
+          {(!watchHistory || watchHistory.length === 0) ? (
+            <div className="flex flex-col items-center justify-center h-56 text-slate-500 space-y-2 text-center p-6">
+              <Clock className="w-10 h-10 text-slate-600 animate-pulse" />
+              <div className="text-xs font-bold text-slate-400">No Watch History Yet</div>
+              <p className="text-[11px] text-slate-500 max-w-xs">
+                Movies and series you play in the theater will automatically be saved here so you can easily pick up where you left off.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {watchHistory.map((item) => {
+                const isCurrent = currentMediaId && (
+                  item.tmdbId ? currentMediaId.includes(String(item.tmdbId)) : item.title === room?.media?.title
+                );
+
+                return (
+                  <div
+                    key={item.id || item.watchedAt}
+                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between space-x-3 ${
+                      isCurrent
+                        ? 'bg-indigo-950/40 border-indigo-500/50 shadow-md'
+                        : 'bg-slate-800/60 hover:bg-slate-800 border-white/5'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      {item.thumbnail ? (
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title}
+                          className="w-12 h-14 rounded-xl object-cover flex-shrink-0 shadow"
+                        />
+                      ) : (
+                        <div className="w-12 h-14 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center flex-shrink-0 text-slate-500">
+                          <Film className="w-5 h-5" />
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-1.5 flex-wrap">
+                          <h4 className="text-xs font-bold text-white truncate max-w-xs">
+                            {item.title}
+                          </h4>
+                          {item.isTv && item.season && item.episode && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              S{item.season}:E{item.episode}
+                            </span>
+                          )}
+                        </div>
+
+                        {item.episodeTitle && (
+                          <div className="text-[11px] text-slate-400 truncate">
+                            {item.episodeTitle}
+                          </div>
+                        )}
+
+                        <div className="flex items-center space-x-2 text-[10px] text-slate-500 mt-0.5">
+                          {item.source && (
+                            <span className="font-semibold text-slate-400">
+                              {item.source}
+                            </span>
+                          )}
+                          <span>•</span>
+                          <span>
+                            {item.watchedAt ? new Date(item.watchedAt).toLocaleDateString([], {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : 'Recently'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleSelectMedia(item, item.season || 1, item.episode || 1, item.episodeTitle || '')}
+                      disabled={!canControl}
+                      className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer flex-shrink-0 ${
+                        canControl
+                          ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow active:scale-95'
+                          : 'bg-slate-700/60 text-slate-500 cursor-not-allowed'
+                      }`}
+                      title="Play in Theater"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Play</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
