@@ -46,6 +46,7 @@ app.all('/assets/*', async (req, res) => {
       const u = new URL(req.headers.referer);
       const paramUrl = u.searchParams.get('url');
       if (paramUrl) domain = new URL(paramUrl).origin;
+      else if (req.headers.referer.includes('7reels.cc')) domain = 'https://7reels.cc';
     } catch(e) {}
   }
   const target = domain + req.originalUrl;
@@ -69,6 +70,44 @@ app.all('/assets/*', async (req, res) => {
     res.send(Buffer.from(buf));
   } catch(e) {
     res.status(404).send(e.message);
+  }
+});
+
+// Dynamic API forwarder for embedded web apps like 7reels when they call relative /api/*
+app.use('/api', async (req, res, next) => {
+  const knownPrefixes = ['/health', '/search', '/resolve-stream', '/rooms', '/stream-proxy'];
+  if (knownPrefixes.some(p => req.path.startsWith(p))) {
+    return next();
+  }
+
+  let targetDomain = null;
+  if (req.headers.referer) {
+    try {
+      const u = new URL(req.headers.referer);
+      const paramUrl = u.searchParams.get('url');
+      if (paramUrl && paramUrl.includes('7reels.cc')) targetDomain = 'https://7reels.cc';
+      else if (req.headers.referer.includes('7reels.cc')) targetDomain = 'https://7reels.cc';
+      else if (paramUrl && paramUrl.includes('1fmovies.live')) targetDomain = 'https://1fmovies.live';
+    } catch(e) {}
+  }
+
+  if (!targetDomain) return next();
+
+  try {
+    const upstreamUrl = targetDomain + req.originalUrl;
+    const r = await fetch(upstreamUrl, {
+      method: req.method,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
+      }
+    });
+    res.setHeader('Content-Type', r.headers.get('content-type') || 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const buf = await r.arrayBuffer();
+    return res.status(r.status).send(Buffer.from(buf));
+  } catch(err) {
+    return next();
   }
 });
 
@@ -119,7 +158,7 @@ app.all('/api/stream-proxy', async (req, res) => {
       html = html.replace(/\scrossorigin(?:=["'][^"']*["'])?/gi, '');
 
       // Do not inject baseTag for 1fmovies to avoid hijacking /api/stream-proxy asset URLs
-      const baseTag = finalTargetUrl.includes('1fmovies') ? '' : `<base href="${finalTargetUrl}">`;
+      const baseTag = (finalTargetUrl.includes('1fmovies') || finalTargetUrl.includes('7reels')) ? '' : `<base href="${finalTargetUrl}">`;
 
       // Auto-Sync Injection Script for 1Fmovies and Web Portals
       const syncScript = `

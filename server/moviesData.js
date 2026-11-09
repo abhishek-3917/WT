@@ -18,6 +18,21 @@ const CURATED_MOVIES = [
     color: "#10b981"
   },
   {
+    id: "platform-7reels",
+    title: "7REELS — Free Movies, TV Shows & Anime Portal",
+    year: "Live Portal",
+    genre: "Movies & Series / In-App Stream",
+    duration: "Unlimited",
+    rating: "9.6",
+    description: "Stream movies, popular series, and anime with in-app portal playback, synchronized video timers, and peer party chat.",
+    thumbnail: "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?auto=format&fit=crop&w=800&q=80",
+    backdrop: "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?auto=format&fit=crop&w=1600&q=80",
+    url: "https://7reels.cc/",
+    type: "7reels",
+    platform: "7reels",
+    color: "#e11d48"
+  },
+  {
     id: "platform-netflix",
     title: "Netflix Watch Party",
     year: "Live Sync",

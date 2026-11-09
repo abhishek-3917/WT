@@ -127,6 +127,20 @@ export default function SearchEngineTab({
     if (onClose) onClose();
   };
 
+  // Launch 7REELS Player in Room
+  const handleLaunch7Reels = (customPath = '') => {
+    const finalUrl = customPath.trim() || sevenReelsUrl.trim() || 'https://7reels.cc/';
+    handleSelectMedia({
+      id: `7reels-${Date.now()}`,
+      title: "7REELS — Free Movies, Shows & Anime",
+      url: finalUrl,
+      type: "7reels",
+      platform: "7reels",
+      thumbnail: "https://images.unsplash.com/photo-1578328819058-b69f3a3b0f6b?auto=format&fit=crop&w=800&q=80",
+      color: "#e11d48"
+    });
+  };
+
   // Launch 1Fmovies Player in Room
   const handleLaunch1Fmovies = (customPath = '') => {
     const finalUrl = customPath.trim() || oneFmoviesUrl.trim() || 'https://1fmovies.live/';
@@ -194,6 +208,10 @@ export default function SearchEngineTab({
       return;
     }
 
+    if (trimmed.includes('7reels.cc')) {
+      handleLaunch7Reels(trimmed);
+      return;
+    }
     if (trimmed.includes('1fmovies.live')) {
       handleLaunch1Fmovies(trimmed);
       return;
@@ -322,6 +340,54 @@ export default function SearchEngineTab({
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="text-xs text-slate-400 leading-relaxed bg-slate-950/50 p-3 rounded-xl border border-white/5">
             Select any streaming service below. You can either stream via the in-app portal or broadcast your browser tab with full audio!
+          </div>
+
+          {/* 0. 7REELS.CC INTEGRATION */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-950/40 via-slate-900 to-slate-900 border border-rose-500/30 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center font-black text-sm">
+                  7R
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center space-x-1.5">
+                    <span>7REELS</span>
+                    <span className="text-[10px] bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded font-mono">7reels.cc</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Free Movies, TV Shows & Anime In-App Portal</p>
+                </div>
+              </div>
+
+              <span className="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded-full font-semibold">
+                Direct Embed
+              </span>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <label className="block text-[11px] font-semibold text-slate-300">
+                7REELS URL or Movie / Anime Page
+              </label>
+              <input
+                type="text"
+                value={sevenReelsUrl}
+                onChange={(e) => setSevenReelsUrl(e.target.value)}
+                placeholder="https://7reels.cc/ or specific movie/show URL"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <button
+              onClick={() => handleLaunch7Reels()}
+              disabled={!canControl}
+              className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition cursor-pointer shadow-md ${
+                canControl
+                  ? 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white active:scale-95'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+              }`}
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Launch 7REELS Player in Room</span>
+            </button>
           </div>
 
           {/* 1. 1FMOVIES.LIVE INTEGRATION */}

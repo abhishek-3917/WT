@@ -221,6 +221,20 @@ export default function App() {
       return;
     }
 
+    if (serviceKey === '7reels') {
+      socket.emit('media_change', {
+        roomId: room.id,
+        media: {
+          id: '7reels-live',
+          title: '7REELS — Free Movies, TV Shows & Anime',
+          url: 'https://7reels.cc/',
+          type: 'portal',
+          platform: '7reels'
+        }
+      });
+      return;
+    }
+
     if (serviceKey === '1fmovies') {
       socket.emit('media_change', {
         roomId: room.id,
@@ -510,6 +524,15 @@ export default function App() {
               </button>
 
               {/* 2. 1Fmovies */}
+              <button
+                onClick={() => handleQuickLaunchPlatform('7reels')}
+                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 text-xs font-semibold transition cursor-pointer active:scale-95 shadow"
+                title="Launch 7REELS Live Portal (Movies, Shows, Anime)"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+                <span className="font-bold">7REELS</span>
+              </button>
+
               <button
                 onClick={() => handleQuickLaunchPlatform('1fmovies')}
                 className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-semibold transition cursor-pointer active:scale-95 shadow"

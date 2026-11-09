@@ -126,7 +126,7 @@ export default function SyncedPlayer({
   const remoteControllerName = room?.remoteControllerName || room?.hostName || 'Host';
   const holdsRemote = currentUser?.socketId === remoteControllerId || (!room?.remoteControllerId && isHost);
   const canControl = holdsRemote || isHost || room?.settings?.controlMode === 'open';
-  const isPortalType = media?.type === '1fmovies' || media?.type === 'platform' || media?.type === 'portal';
+  const isPortalType = media?.type === '1fmovies' || media?.type === '7reels' || media?.type === 'platform' || media?.type === 'portal' || media?.url?.includes('1fmovies.live') || media?.url?.includes('7reels.cc');
 
   // State for direct HLS stream resolution (converts third-party iframe embeds into native synced player)
   const [resolvedHlsUrl, setResolvedHlsUrl] = useState(null);
@@ -1296,6 +1296,17 @@ export default function SyncedPlayer({
         btnColor: 'bg-cyan-600 hover:bg-cyan-500',
         focusBorder: 'focus:border-cyan-500',
         icon: 'P'
+      };
+    }
+    if (platform === '7reels' || media?.url?.includes('7reels.cc')) {
+      return {
+        name: '7REELS Movies, Shows & Anime',
+        shortTag: '7REELS',
+        colorBadge: 'bg-rose-500/20 text-rose-400 border border-rose-500/40',
+        pingDot: 'bg-rose-400',
+        btnColor: 'bg-rose-600 hover:bg-rose-500',
+        focusBorder: 'focus:border-rose-500',
+        icon: '7R'
       };
     }
     if (platform === '1fmovies' || media?.url?.includes('1fmovies.live')) {
