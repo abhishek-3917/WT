@@ -143,6 +143,7 @@ export default function SyncedPlayer({
   // State for direct HLS stream resolution (converts third-party iframe embeds into native synced player)
   const [resolvedHlsUrl, setResolvedHlsUrl] = useState(null);
   const hlsRef = useRef(null);
+  const lastHeartbeatRef = useRef(0);
   const [audioTracks, setAudioTracks] = useState([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState(0);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
@@ -344,18 +345,15 @@ export default function SyncedPlayer({
       return;
     }
 
-    const isDedicatedSource = media?.source === '7REELS' || media?.source === '1Fmovies' || media?.platform === '7reels' || media?.platform === '1fmovies' || media?.url?.includes('vidy.st') || media?.url?.includes('silverlinehub.org') || media?.url?.includes('anyembed.xyz');
     const detectedTmdbId = media?.tmdbId ||
+      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
       (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
-      (media?.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
-      (media?.backupUrl?.match(/tmdb_id=(\d+)/)?.[1]) ||
-      (media?.backupUrl?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
-      (media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
-      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]);
+      (media?.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
+      (media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
 
-    if (detectedTmdbId && !isDedicatedSource) {
+    if (detectedTmdbId && media?.type !== 'platform' && !media?.url?.includes('.m3u8')) {
       const tmdbId = detectedTmdbId;
-      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv') || media?.backupUrl?.includes('/tv/');
+      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv') || media?.url?.includes('/tv/') || media?.backupUrl?.includes('/tv/');
       const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
       console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, 'Source:', media?.source || 'Direct');
       setIsResolvingStream(true);
@@ -995,6 +993,19 @@ export default function SyncedPlayer({
       if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
       }
+
+      // Periodically update host heartbeat so server and room participants stay aligned to Host's exact video position
+      if (canControl && !video.paused) {
+        const now = Date.now();
+        if (now - lastHeartbeatRef.current >= 1000) {
+          lastHeartbeatRef.current = now;
+          socket.emit('host_heartbeat', {
+            roomId: room.id,
+            currentTime: video.currentTime || 0,
+            isPlaying: true
+          });
+        }
+      }
     };
 
     const onDurationChange = () => {
@@ -1013,6 +1024,9 @@ export default function SyncedPlayer({
       }
       if (media.isPlaying) {
         safePlay();
+      }
+      if (!canControl && room?.id) {
+        socket.emit('request_sync', { roomId: room.id });
       }
     };
 
@@ -1036,6 +1050,7 @@ export default function SyncedPlayer({
         return;
       }
       socket.emit('media_play', { roomId: room.id, currentTime: video.currentTime || 0 });
+      socket.emit('host_heartbeat', { roomId: room.id, currentTime: video.currentTime || 0, isPlaying: true });
     };
 
     const onPause = () => {
@@ -1049,12 +1064,14 @@ export default function SyncedPlayer({
         return;
       }
       socket.emit('media_pause', { roomId: room.id, currentTime: video.currentTime || 0 });
+      socket.emit('host_heartbeat', { roomId: room.id, currentTime: video.currentTime || 0, isPlaying: false });
     };
 
     const onSeeked = () => {
       if (isRemoteAction.current) return;
       if (!canControl) return;
       socket.emit('media_seek', { roomId: room.id, currentTime: video.currentTime || 0 });
+      socket.emit('host_heartbeat', { roomId: room.id, currentTime: video.currentTime || 0, isPlaying: !video.paused });
     };
 
     video.addEventListener('timeupdate', onTimeUpdate);
@@ -1829,20 +1846,42 @@ export default function SyncedPlayer({
 
             {/* Quick Actions & Sync Indicators */}
             <div className="flex items-center space-x-2 flex-shrink-0">
+              {/* Play / Pause Room Toggle Button */}
+              {canControl && (
+                <button
+                  onClick={handleTogglePlay}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center space-x-1.5 transition cursor-pointer border ${
+                    isPlaying ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}
+                  title={isPlaying ? "Pause for Everyone in Room" : "Play for Everyone in Room"}
+                >
+                  {isPlaying ? <Pause className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
+                  <span>{isPlaying ? 'Pause Room' : 'Play Room'}</span>
+                </button>
+              )}
+
+              {/* Instant Resync Button */}
+              <button
+                onClick={handleRequestSync}
+                className="px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center space-x-1.5 transition cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10"
+                title="Resync video with Host"
+              >
+                <RefreshCw className="w-3 h-3 text-emerald-400" />
+                <span>Resync</span>
+              </button>
+
               {/* Quality Selector with Source Original Quality */}
               <div className="relative">
                 <button
                   onClick={() => setShowQualityMenu(prev => !prev)}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center space-x-1.5 transition cursor-pointer border ${
-                    selectedQuality === '2160p'
+                    selectedQuality === '1080p'
                       ? 'bg-rose-500/25 text-rose-300 border-rose-500/40 shadow-sm'
-                      : selectedQuality === '1080p'
-                        ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
-                        : 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700'
+                      : 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700'
                   }`}
                   title="Source Original Quality"
                 >
-                  <span>Quality: {selectedQuality || (media?.source === '7REELS' ? '2160p' : media?.source === '1Fmovies' ? '1080p' : 'Auto')}</span>
+                  <span>Quality: {selectedQuality || '1080p'}</span>
                   <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
                 </button>
 
@@ -1851,7 +1890,7 @@ export default function SyncedPlayer({
                     <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
                       <span>{media?.source || 'Original'} Quality</span>
                       <span className="text-[9px] font-bold text-rose-400 bg-rose-500/15 px-1.5 py-0.5 rounded border border-rose-500/30">
-                        {media?.source === '7REELS' ? 'Up to 2160p (4K)' : media?.source === '1Fmovies' ? 'Up to 1080p (FHD)' : 'Direct Stream'}
+                        Up to 1080p (FHD)
                       </span>
                     </div>
 
@@ -2252,19 +2291,18 @@ export default function SyncedPlayer({
                 </div>
               )}
 
-              {/* Stream Quality Selector up to 4K Ultra HD */}
+              {/* Stream Quality Selector up to 1080p Full HD */}
               <div className="relative">
                 <button
                   onClick={() => setShowQualityMenu(prev => !prev)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border ${
-                    (selectedQuality === '2160p' || selectedQuality === '4k') ? 'bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/10'
-                      : selectedQuality === '1440p'
-                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                        : 'bg-white/10 hover:bg-white/20 text-slate-300 border-white/5'
+                    selectedQuality === '1080p'
+                      ? 'bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-emerald-300 border-emerald-500/50 shadow-lg shadow-emerald-500/10'
+                      : 'bg-white/10 hover:bg-white/20 text-slate-300 border-white/5'
                   }`}
-                  title="Select Stream Quality (up to 4K UHD)"
+                  title="Select Stream Quality (up to 1080p FHD)"
                 >
-                  {(selectedQuality === '2160p' || selectedQuality === '4k') && <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />}
+                  {selectedQuality === '1080p' && <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />}
                   <span className="text-[11px] font-bold">
                     {selectedQuality === 'auto'
                       ? (availableQualityOptions.find(q => q.id === 'auto')?.shortLabel || 'Auto')
@@ -2277,7 +2315,7 @@ export default function SyncedPlayer({
                   <div className="absolute bottom-full mb-2 right-0 bg-slate-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl z-50 min-w-[220px] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
                       <span>Stream Quality</span>
-                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">Up to 2160p (4K)</span>
+                      <span className="text-[9px] text-emerald-400 font-bold bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">Up to 1080p (FHD)</span>
                     </div>
 
                     <div className="space-y-0.5">

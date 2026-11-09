@@ -88,16 +88,16 @@ export default function SearchEngineTab({
 
     let finalItem = { ...mediaItem };
 
-    // Only resolve external direct HLS if NOT already a dedicated source (7REELS has its own 2160p stream, 1Fmovies has 1080p stream)
-    const isDedicatedSource = mediaItem.source === '7REELS' || mediaItem.source === '1Fmovies' || mediaItem.platform === '7reels' || mediaItem.platform === '1fmovies';
     const tmdbId = mediaItem.tmdbId || 
       (mediaItem.id && mediaItem.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
       (mediaItem.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
       (mediaItem.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
+      (mediaItem.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
       (mediaItem.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
-    if (tmdbId && !isDedicatedSource) {
+
+    if (tmdbId && mediaItem.type !== 'platform') {
       try {
-        const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv');
+        const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv') || mediaItem.url?.includes('/tv/') || mediaItem.backupUrl?.includes('/tv/');
         const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
         const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`);
         if (res.ok) {
@@ -121,7 +121,7 @@ export default function SearchEngineTab({
         title: finalItem.title,
         url: finalItem.url,
         backupUrl: finalItem.backupUrl || null,
-        type: finalItem.type || (finalItem.url?.includes('.m3u8') ? 'hls' : finalItem.source === '7REELS' ? '7reels' : finalItem.source === '1Fmovies' ? '1fmovies' : finalItem.url?.includes('embed') ? 'stream' : 'video'),
+        type: finalItem.type || (finalItem.url?.includes('.m3u8') ? 'hls' : finalItem.url?.includes('embed') ? 'stream' : finalItem.source === '7REELS' ? '7reels' : finalItem.source === '1Fmovies' ? '1fmovies' : 'video'),
         thumbnail: finalItem.thumbnail || finalItem.backdrop,
         platform: finalItem.platform || null,
         color: finalItem.color || null,

@@ -985,6 +985,7 @@ io.on('connection', (socket) => {
     const member = room.members.get(socket.id);
     room.media = {
       id: media.id || `custom-${Date.now()}`,
+      tmdbId: media.tmdbId || null,
       title: media.title,
       url: media.url,
       backupUrl: media.backupUrl || null,
@@ -993,18 +994,24 @@ io.on('connection', (socket) => {
       currentTime: 0,
       isPlaying: true, // Auto play on new movie selection
       playbackRate: 1.0,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
+      source: media.source || null,
+      platform: media.platform || null,
+      originalQuality: media.originalQuality || '1080p',
+      availableQualities: media.availableQualities || null
     };
 
     console.log(`[Media Changed] in ${roomId} to "${media.title}" by ${member?.name}`);
 
     // If media is a TMDB movie/series and not yet direct HLS, attempt server-side resolution
     const rawTmdbId = media.tmdbId || 
-      (media.id && media.id.startsWith('tmdb-') ? media.id.replace('tmdb-', '') : null) ||
+      (media.id && media.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
       (media.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
-      (media.backupUrl?.match(/tmdb_id=(\d+)/)?.[1]);
-    if (rawTmdbId && room.media.type !== 'hls') {
-      const isTv = media.platform === 'tv' || media.url?.includes('type=series') || media.backupUrl?.includes('tmdb-tv');
+      (media.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
+      (media.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
+
+    if (rawTmdbId && room.media.type !== 'hls' && media.type !== 'platform') {
+      const isTv = media.platform === 'tv' || media.genre?.includes('Series') || media.url?.includes('type=series') || media.backupUrl?.includes('tmdb-tv') || media.url?.includes('/tv/') || media.backupUrl?.includes('/tv/');
       const targetUrl = isTv
         ? `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}&type=series&season=1&episode=1`
         : `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}`;
@@ -1016,9 +1023,10 @@ io.on('connection', (socket) => {
         const match = html.match(/https:\/\/[^"'<>\s]+master\.m3u8[^"'<>\s]*/);
         if (match) {
           let masterUrl = match[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\+$/, '').replace(/"$/, '');
-          console.log(`[Server Auto-Resolve] Converted "${room.media.title}" to direct HLS stream`);
+          console.log(`[Server Auto-Resolve] Converted "${room.media.title}" to direct HLS stream: ${masterUrl}`);
           room.media.url = masterUrl;
           room.media.type = 'hls';
+          room.media.backupUrl = media.url;
           io.to(roomId).emit('media_changed', {
             media: room.media,
             triggeredBy: member?.name || 'Remote Controller'
