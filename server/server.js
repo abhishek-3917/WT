@@ -168,8 +168,8 @@ app.all('/api/stream-proxy', async (req, res) => {
           window.__CINESYNC_TARGET_URL = "${finalTargetUrl}";
           window.__CINESYNC_TARGET_ORIGIN = "${origin}";
 
-          // Reset pathname if loaded on /api/stream-proxy so React Router mounts root view
-          if (window.location.pathname.includes('/api/stream-proxy')) {
+          // Only reset pathname if target was an SPA root (avoid breaking deep video/series routes)
+          if (window.location.pathname.includes('/api/stream-proxy') && !window.__CINESYNC_TARGET_URL.includes('/movie') && !window.__CINESYNC_TARGET_URL.includes('/tv') && !window.__CINESYNC_TARGET_URL.includes('vidy') && !window.__CINESYNC_TARGET_URL.includes('7reels') && !window.__CINESYNC_TARGET_URL.includes('silverlinehub')) {
             try {
               history.replaceState(null, '', '/');
             } catch(e) {}
@@ -514,8 +514,8 @@ app.get('/api/search', async (req, res) => {
                 thumbnail: thumb,
                 backdrop: back,
                 url: isTv 
-                  ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-1-1` 
-                  : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`,
+                  ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=1&episode=1` 
+                  : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`,
                 backupUrl: `https://1fmovies.live/`,
                 type: "1fmovies",
                 platform: '1fmovies',
@@ -598,7 +598,7 @@ app.get('/api/search', async (req, res) => {
               description: desc,
               thumbnail: thumb,
               backdrop: back,
-              url: `https://anyembed.xyz/embed/tmdb-movie-${item.id}`,
+              url: `https://player.silverlinehub.org/?tmdb_id=${item.id}`,
               backupUrl: `https://1fmovies.live/`,
               type: "1fmovies",
               platform: '1fmovies',

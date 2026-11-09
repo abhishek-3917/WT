@@ -128,11 +128,16 @@ export default function SyncedPlayer({
   const canControl = holdsRemote || isHost || room?.settings?.controlMode === 'open';
   const isPortalType = media?.type === '1fmovies' || 
     media?.type === '7reels' || 
+    media?.source === '7REELS' ||
+    media?.source === '1Fmovies' ||
+    media?.platform === '7reels' ||
+    media?.platform === '1fmovies' ||
     media?.type === 'platform' || 
     media?.type === 'portal' || 
     media?.url?.includes('1fmovies.live') || 
     media?.url?.includes('7reels.cc') ||
     media?.url?.includes('vidy.st') ||
+    media?.url?.includes('silverlinehub.org') ||
     media?.url?.includes('anyembed.xyz');
 
   // State for direct HLS stream resolution (converts third-party iframe embeds into native synced player)
@@ -309,6 +314,8 @@ export default function SyncedPlayer({
   useEffect(() => {
     // Immediately clear previous stream & reset player state when movie/show changes
     setResolvedHlsUrl(null);
+    setPortalUrl(media?.url || '');
+    setCustom1fmoviesUrl(media?.url || '');
     setCurrentTime(0);
     setDuration(0);
     setQualityLevels([]);
@@ -337,7 +344,7 @@ export default function SyncedPlayer({
       return;
     }
 
-    const isDedicatedSource = media?.source === '7REELS' || media?.source === '1Fmovies' || media?.platform === '7reels' || media?.platform === '1fmovies' || media?.url?.includes('vidy.st') || media?.url?.includes('anyembed.xyz');
+    const isDedicatedSource = media?.source === '7REELS' || media?.source === '1Fmovies' || media?.platform === '7reels' || media?.platform === '1fmovies' || media?.url?.includes('vidy.st') || media?.url?.includes('silverlinehub.org') || media?.url?.includes('anyembed.xyz');
     const detectedTmdbId = media?.tmdbId ||
       (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
       (media?.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
@@ -385,6 +392,8 @@ export default function SyncedPlayer({
   const isHtmlPageUrl = Boolean(
     media?.url?.includes('player.silverlinehub.org') ||
     media?.url?.includes('1fmovies.live') ||
+    media?.url?.includes('7reels.cc') ||
+    media?.url?.includes('vidy.st') ||
     media?.url?.includes('netflix.com') ||
     media?.url?.includes('primevideo.com') ||
     media?.url?.includes('hotstar.com') ||
@@ -406,14 +415,14 @@ export default function SyncedPlayer({
     setSelectedQuality(qualityId);
     setShowQualityMenu(false);
 
-    const is7Reels = media?.source === '7REELS' || media?.platform === '7reels' || media?.url?.includes('7reels') || media?.url?.includes('vidy.st');
-    const is1Fmovies = media?.source === '1Fmovies' || media?.platform === '1fmovies' || media?.url?.includes('1fmovies') || media?.url?.includes('anyembed');
+    const is7Reels = media?.source === '7REELS' || media?.platform === '7reels' || media?.url?.includes('7reels') || media?.url?.includes('vidy.st') || portalUrl?.includes('vidy.st');
+    const is1Fmovies = media?.source === '1Fmovies' || media?.platform === '1fmovies' || media?.url?.includes('1fmovies') || media?.url?.includes('anyembed') || media?.url?.includes('silverlinehub') || portalUrl?.includes('silverlinehub');
 
     if (is7Reels) {
       // Apply quality directly to 7REELS original stream without downscaling/upscaling
-      if (media?.url?.includes('vidy.st')) {
+      if (media?.url?.includes('vidy.st') || portalUrl?.includes('vidy.st')) {
         try {
-          const currentUrl = portalUrl || custom1fmoviesUrl || media.url;
+          const currentUrl = portalUrl || media?.url || custom1fmoviesUrl;
           const u = new URL(currentUrl);
           if (qualityId === 'auto') {
             u.searchParams.delete('quality');
@@ -438,6 +447,7 @@ export default function SyncedPlayer({
       if (iframeRef.current) {
         try {
           iframeRef.current.contentWindow?.postMessage({ command: 'setQuality', quality: qualityId }, '*');
+          iframeRef.current.contentWindow?.postMessage({ type: 'SET_QUALITY', quality: qualityId }, '*');
         } catch (e) {}
       }
       setQualityNotice(`🍿 1Fmovies Original Quality: ${qualityId.toUpperCase()}`);
@@ -1407,7 +1417,7 @@ export default function SyncedPlayer({
         icon: 'P'
       };
     }
-    if (platform === '7reels' || media?.url?.includes('7reels.cc')) {
+    if (platform === '7reels' || media?.source === '7REELS' || media?.url?.includes('7reels.cc') || media?.url?.includes('vidy.st') || portalUrl?.includes('vidy.st')) {
       return {
         name: '7REELS Movies, Shows & Anime',
         shortTag: '7REELS',
@@ -1418,7 +1428,7 @@ export default function SyncedPlayer({
         icon: '7R'
       };
     }
-    if (platform === '1fmovies' || media?.url?.includes('1fmovies.live')) {
+    if (platform === '1fmovies' || media?.source === '1Fmovies' || media?.url?.includes('1fmovies.live') || media?.url?.includes('silverlinehub.org') || portalUrl?.includes('silverlinehub.org')) {
       return {
         name: '1Fmovies Live',
         shortTag: '1Fmovies',
@@ -1442,9 +1452,22 @@ export default function SyncedPlayer({
 
   const brand = getBrandDetails();
 
-  // Target embed URL for In-Website Window (proxied with auto-sync script)
-  const currentPortalTarget = portalUrl || custom1fmoviesUrl || media?.url || 'https://1fmovies.live/';
-  const embedPortalSrc = useProxy 
+  // Target embed URL for In-Website Window
+  const currentPortalTarget = portalUrl || media?.url || custom1fmoviesUrl || 'https://1fmovies.live/';
+  const isDirectEmbed = Boolean(
+    currentPortalTarget.includes('vidy.st') ||
+    currentPortalTarget.includes('7reels.cc') ||
+    currentPortalTarget.includes('silverlinehub.org') ||
+    currentPortalTarget.includes('autoembed') ||
+    currentPortalTarget.includes('anyembed') ||
+    currentPortalTarget.includes('1fmovies') ||
+    currentPortalTarget.includes('vidfast') ||
+    media?.source === '7REELS' ||
+    media?.source === '1Fmovies' ||
+    media?.platform === '7reels' ||
+    media?.platform === '1fmovies'
+  );
+  const embedPortalSrc = (!isDirectEmbed && useProxy) 
     ? `/api/stream-proxy?url=${encodeURIComponent(currentPortalTarget)}`
     : currentPortalTarget;
   const embed1fmoviesSrc = embedPortalSrc;
@@ -1906,16 +1929,15 @@ export default function SyncedPlayer({
             </div>
           </div>
 
-          {/* Embedded In-Website Frame with Injected Auto-Sync Script */}
+          {/* Embedded In-Website Frame */}
           <div className="flex-1 w-full h-full relative bg-slate-900 overflow-hidden">
             <iframe
               ref={iframeRef}
-              key={media?.id || brand.shortTag}
+              key={`${media?.id || brand.shortTag}-${embedPortalSrc}`}
               src={embedPortalSrc}
               title={`${brand.name} Portal`}
               className="w-full h-full border-0"
-              allow="autoplay; encrypted-media; fullscreen; picture-in-picture; clipboard-read; clipboard-write; credentials"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-presentation allow-popups allow-modals allow-downloads"
+              allow="autoplay *; encrypted-media *; fullscreen *; picture-in-picture *; clipboard-read; clipboard-write; credentials"
             />
           </div>
         </div>
