@@ -25,6 +25,7 @@ export default function SearchEngineTab({
   const [loading, setLoading] = useState(false);
 
   // Platform specific inputs
+  const [sevenReelsUrl, setSevenReelsUrl] = useState('https://7reels.cc/');
   const [oneFmoviesUrl, setOneFmoviesUrl] = useState('https://1fmovies.live/');
   const [netflixUrl, setNetflixUrl] = useState('');
   const [hotstarUrl, setHotstarUrl] = useState('');
