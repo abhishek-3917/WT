@@ -447,7 +447,7 @@ app.get('/api/search', async (req, res) => {
       m.year.includes(query)
     );
 
-    // Live TMDB / Cinemax Multi-Search (Movies & Series with Direct Stream Embeds)
+    // Live Multi-Search with BOTH 7REELS and 1Fmovies Stream Results
     let liveResults = [];
     try {
       const cinemaxRes = await fetch(`https://gove.co.in/cinemax/search/multi?query=${encodeURIComponent(query)}&language=en-US&page=1`, {
@@ -458,70 +458,159 @@ app.get('/api/search', async (req, res) => {
         const items = cinemaxData?.results || [];
         liveResults = items
           .filter(item => (item.title || item.name) && (item.media_type === 'movie' || item.media_type === 'tv'))
-          .slice(0, 16)
-          .map(item => {
+          .slice(0, 12)
+          .flatMap(item => {
             const isTv = item.media_type === 'tv';
             const tmdbId = item.id;
-            return {
-              id: `tmdb-${tmdbId}`,
-              tmdbId: tmdbId,
-              title: item.title || item.name,
-              year: (item.release_date || item.first_air_date || '').split('-')[0] || '2024',
-              genre: isTv ? 'TV Series' : 'Feature Movie',
-              duration: isTv ? 'Series' : 'Movie',
-              rating: item.vote_average ? item.vote_average.toFixed(1) : '8.0',
-              description: item.overview || 'Watch in room with synchronized live playback and peer video chat.',
-              thumbnail: item.poster_path 
-                ? `https://image.tmdb.org/t/p/w342${item.poster_path}` 
-                : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80',
-              backdrop: item.backdrop_path 
-                ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` 
-                : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80',
-              url: isTv 
-                ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=1&episode=1` 
-                : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`,
-              backupUrl: isTv 
-                ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-1-1` 
-                : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`,
-              type: "stream",
-              platform: isTv ? 'tv' : 'movie'
-            };
+            const title = item.title || item.name;
+            const year = (item.release_date || item.first_air_date || '').split('-')[0] || '2024';
+            const rating = item.vote_average ? item.vote_average.toFixed(1) : '8.0';
+            const desc = item.overview || 'Watch in room with synchronized live playback and peer video chat.';
+            const thumb = item.poster_path 
+              ? `https://image.tmdb.org/t/p/w342${item.poster_path}` 
+              : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80';
+            const back = item.backdrop_path 
+              ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` 
+              : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
+
+            return [
+              // 1. Result from 7REELS
+              {
+                id: `7reels-${tmdbId}`,
+                tmdbId: tmdbId,
+                title: title,
+                year: year,
+                genre: isTv ? 'TV Series' : 'Feature Film',
+                duration: isTv ? 'Series' : 'Feature',
+                rating: rating,
+                description: desc,
+                thumbnail: thumb,
+                backdrop: back,
+                url: isTv 
+                  ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=1&episode=1` 
+                  : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`,
+                backupUrl: isTv 
+                  ? `https://7reels.cc/tv/${tmdbId}` 
+                  : `https://7reels.cc/movie/${tmdbId}`,
+                type: "stream",
+                platform: '7reels',
+                source: '7REELS',
+                sourceBadge: '7REELS',
+                sourceDomain: '7reels.cc',
+                sourceColor: '#e11d48'
+              },
+              // 2. Result from 1Fmovies
+              {
+                id: `1fmovies-${tmdbId}`,
+                tmdbId: tmdbId,
+                title: title,
+                year: year,
+                genre: isTv ? 'TV Series' : 'Feature Film',
+                duration: isTv ? 'Series' : 'Feature',
+                rating: rating,
+                description: desc,
+                thumbnail: thumb,
+                backdrop: back,
+                url: isTv 
+                  ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-1-1` 
+                  : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`,
+                backupUrl: `https://1fmovies.live/`,
+                type: "stream",
+                platform: '1fmovies',
+                source: '1Fmovies',
+                sourceBadge: '1Fmovies',
+                sourceDomain: '1fmovies.live',
+                sourceColor: '#10b981'
+              }
+            ];
           });
       }
     } catch (err) {
       console.warn('[Search Engine] Cinemax API search error:', err.message);
     }
 
+    if (category && category !== 'all') {
+      if (category === '7reels') {
+        liveResults = liveResults.filter(m => m.source === '7REELS');
+      } else if (category === '1fmovies') {
+        liveResults = liveResults.filter(m => m.source === '1Fmovies');
+      }
+    }
+
     return res.json([...liveResults, ...matchedCurated]);
   } else {
-    // When query is empty, fetch top Trending movies from Cinemax API to populate the catalog
+    // When query is empty, fetch top Trending movies from both 7REELS and 1Fmovies
     try {
       const trendRes = await fetch('https://gove.co.in/cinemax/trending/movie/day', {
         signal: AbortSignal.timeout(3000)
       });
       if (trendRes.ok) {
         const trendData = await trendRes.json();
-        const trendItems = (trendData?.results || []).slice(0, 10).map(item => ({
-          id: `tmdb-${item.id}`,
-          tmdbId: item.id,
-          title: item.title || item.name,
-          year: (item.release_date || item.first_air_date || '').split('-')[0] || '2024',
-          genre: 'Trending Movie',
-          duration: 'Feature',
-          rating: item.vote_average ? item.vote_average.toFixed(1) : '8.2',
-          description: item.overview || 'Trending worldwide. Watch live with synchronized playback.',
-          thumbnail: item.poster_path 
+        const trendItems = (trendData?.results || []).slice(0, 10).flatMap(item => {
+          const title = item.title || item.name;
+          const year = (item.release_date || item.first_air_date || '').split('-')[0] || '2024';
+          const rating = item.vote_average ? item.vote_average.toFixed(1) : '8.2';
+          const desc = item.overview || 'Trending worldwide. Watch live with synchronized playback.';
+          const thumb = item.poster_path 
             ? `https://image.tmdb.org/t/p/w342${item.poster_path}` 
-            : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80',
-          backdrop: item.backdrop_path 
+            : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80';
+          const back = item.backdrop_path 
             ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` 
-            : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80',
-          url: `https://player.silverlinehub.org/?tmdb_id=${item.id}`,
-          backupUrl: `https://anyembed.xyz/embed/tmdb-movie-${item.id}`,
-          type: "stream",
-          platform: 'movie'
-        }));
-        return res.json([...trendItems, ...results]);
+            : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
+
+          return [
+            // 7REELS Result
+            {
+              id: `7reels-${item.id}`,
+              tmdbId: item.id,
+              title: title,
+              year: year,
+              genre: 'Trending Movie',
+              duration: 'Feature',
+              rating: rating,
+              description: desc,
+              thumbnail: thumb,
+              backdrop: back,
+              url: `https://player.silverlinehub.org/?tmdb_id=${item.id}`,
+              backupUrl: `https://7reels.cc/movie/${item.id}`,
+              type: "stream",
+              platform: '7reels',
+              source: '7REELS',
+              sourceBadge: '7REELS',
+              sourceDomain: '7reels.cc',
+              sourceColor: '#e11d48'
+            },
+            // 1Fmovies Result
+            {
+              id: `1fmovies-${item.id}`,
+              tmdbId: item.id,
+              title: title,
+              year: year,
+              genre: 'Trending Movie',
+              duration: 'Feature',
+              rating: rating,
+              description: desc,
+              thumbnail: thumb,
+              backdrop: back,
+              url: `https://anyembed.xyz/embed/tmdb-movie-${item.id}`,
+              backupUrl: `https://1fmovies.live/`,
+              type: "stream",
+              platform: '1fmovies',
+              source: '1Fmovies',
+              sourceBadge: '1Fmovies',
+              sourceDomain: '1fmovies.live',
+              sourceColor: '#10b981'
+            }
+          ];
+        });
+
+        let finalTrend = trendItems;
+        if (category && category !== 'all') {
+          if (category === '7reels') finalTrend = finalTrend.filter(m => m.source === '7REELS');
+          else if (category === '1fmovies') finalTrend = finalTrend.filter(m => m.source === '1Fmovies');
+        }
+
+        return res.json([...finalTrend, ...results]);
       }
     } catch (err) {
       console.warn('[Search Engine] Trending fetch error:', err.message);

@@ -42,7 +42,9 @@ export default function SearchEngineTab({
   const currentMediaId = room?.media?.id;
 
   const categories = [
-    { id: 'all', label: 'All Titles & Trending' },
+    { id: 'all', label: '🔥 All (7REELS & 1Fmovies)' },
+    { id: '7reels', label: '🎬 7REELS' },
+    { id: '1fmovies', label: '🍿 1Fmovies' },
     { id: 'movies', label: 'Feature Films' },
     { id: 'animation', label: 'Animation' },
     { id: 'sci-fi', label: 'Sci-Fi' },
@@ -88,8 +90,10 @@ export default function SearchEngineTab({
 
     // If it is a TMDB movie or has tmdbId, resolve direct HLS stream so it plays in our SINGLE synced player!
     const tmdbId = mediaItem.tmdbId || 
-      (mediaItem.id && mediaItem.id.startsWith('tmdb-') ? mediaItem.id.replace('tmdb-', '') : null) ||
-      (mediaItem.url?.match(/tmdb_id=(\d+)/)?.[1]);
+      (mediaItem.id && mediaItem.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
+      (mediaItem.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (mediaItem.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
+      (mediaItem.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
     if (tmdbId) {
       try {
         const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv');
@@ -121,7 +125,9 @@ export default function SearchEngineTab({
         platform: finalItem.platform || null,
         color: finalItem.color || null,
         year: finalItem.year || null,
-        genre: finalItem.genre || null
+        genre: finalItem.genre || null,
+        source: finalItem.source || (finalItem.platform === '7reels' ? '7REELS' : finalItem.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream'),
+        sourceDomain: finalItem.sourceDomain || (finalItem.platform === '7reels' ? '7reels.cc' : finalItem.platform === '1fmovies' ? '1fmovies.live' : null)
       }
     });
 
@@ -641,15 +647,39 @@ export default function SearchEngineTab({
                     <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
                       <div>
                         <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-bold text-white truncate max-w-[170px] group-hover:text-indigo-300 transition-colors">
-                            {movie.title}
-                          </h4>
-                          <span className="text-[11px] font-mono text-amber-400 font-bold ml-1">
+                          <div className="flex items-center space-x-1.5 truncate max-w-[200px]">
+                            <h4 className="text-sm font-bold text-white truncate group-hover:text-indigo-300 transition-colors">
+                              {movie.title}
+                            </h4>
+                            {/* Source Badge from where movie is fetched */}
+                            {movie.source === '7REELS' || movie.platform === '7reels' ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex-shrink-0 tracking-wider">
+                                7REELS
+                              </span>
+                            ) : movie.source === '1Fmovies' || movie.platform === '1fmovies' ? (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex-shrink-0 tracking-wider">
+                                1Fmovies
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex-shrink-0 tracking-wider">
+                                {movie.source || 'Cinema Direct'}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-mono text-amber-400 font-bold ml-1 flex-shrink-0">
                             ★ {movie.rating}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">
-                          {movie.year} • {movie.genre}
+                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1 flex items-center space-x-1">
+                          <span>{movie.year} • {movie.genre}</span>
+                          <span className="text-slate-500">•</span>
+                          <span className="text-slate-300 font-medium">
+                            Source: <strong className={
+                              movie.source === '7REELS' || movie.platform === '7reels' ? 'text-rose-400' :
+                              movie.source === '1Fmovies' || movie.platform === '1fmovies' ? 'text-emerald-400' :
+                              'text-indigo-300'
+                            }>{movie.source || (movie.platform === '7reels' ? '7REELS' : movie.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream')}</strong>
+                          </span>
                         </p>
                       </div>
 
@@ -673,8 +703,19 @@ export default function SearchEngineTab({
                             <span>Play in Room</span>
                           </button>
                         )}
-                        <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          {movie.type === 'stream' ? 'Direct Video Sync' : 'Synced'}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center space-x-1 ${
+                          movie.source === '7REELS' || movie.platform === '7reels'
+                            ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
+                            : movie.source === '1Fmovies' || movie.platform === '1fmovies'
+                              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                              : 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                            movie.source === '7REELS' || movie.platform === '7reels' ? 'bg-rose-400' :
+                            movie.source === '1Fmovies' || movie.platform === '1fmovies' ? 'bg-emerald-400' :
+                            'bg-indigo-400'
+                          }`} />
+                          <span>{movie.source ? `${movie.source}` : 'Direct Sync'}</span>
                         </span>
                       </div>
                     </div>

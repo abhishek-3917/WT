@@ -140,72 +140,96 @@ export default function SyncedPlayer({
   const [qualityNotice, setQualityNotice] = useState(null);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
-  // Quality presets up to 4K Ultra HD
-  const QUALITY_OPTIONS = [
-    { 
-      id: '4k', 
-      label: '4K Ultra HD (2160p)', 
-      shortLabel: '4K UHD', 
-      height: 2160, 
-      badge: '4K', 
-      badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-      description: 'Max 2160p Bitrate + Super Resolution AI' 
-    },
-    { 
-      id: '1440p', 
-      label: '2K Quad HD (1440p)', 
-      shortLabel: '2K QHD', 
-      height: 1440, 
-      badge: '2K', 
-      badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
-      description: 'High Bitrate 1440p Clarity' 
-    },
-    { 
-      id: '1080p', 
-      label: '1080p Full HD', 
-      shortLabel: '1080p FHD', 
-      height: 1080, 
-      badge: 'FHD', 
-      badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
-      description: 'Crisp 1080p Standard Theater' 
-    },
-    { 
-      id: '720p', 
-      label: '720p HD', 
-      shortLabel: '720p HD', 
-      height: 720, 
-      badge: 'HD', 
-      badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-      description: 'Balanced HD Stream' 
-    },
-    { 
-      id: '480p', 
-      label: '480p SD', 
-      shortLabel: '480p SD', 
-      height: 480, 
-      badge: 'SD', 
-      badgeClass: 'bg-slate-700/50 text-slate-300 border-slate-600',
-      description: 'Standard Definition' 
-    },
-    { 
-      id: '360p', 
-      label: '360p Data Saver', 
-      shortLabel: '360p', 
-      height: 360, 
-      badge: 'Low', 
-      badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
-      description: 'Optimized for slower networks' 
-    },
-    { 
-      id: 'auto', 
-      label: 'Auto (Adaptive)', 
-      shortLabel: 'Auto', 
-      height: -1, 
-      badge: 'Auto', 
-      badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-      description: 'Auto-adjusts to your internet speed' 
+  // Dynamic Stream Resolution Options (Directly matches what is available on fetched site)
+  const availableQualityOptions = React.useMemo(() => {
+    const activeHeight = currentQualityLevel >= 0 && qualityLevels[currentQualityLevel]
+      ? qualityLevels[currentQualityLevel].height
+      : null;
+
+    const options = [
+      {
+        id: 'auto',
+        label: 'Auto (Adaptive)',
+        shortLabel: activeHeight ? `Auto • ${activeHeight}p` : 'Auto',
+        height: -1,
+        badge: 'Auto',
+        badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+        description: 'Dynamically adapts to your connection speed'
+      }
+    ];
+
+    if (qualityLevels && qualityLevels.length > 0) {
+      const seen = new Set();
+      const uniqueLevels = [];
+      qualityLevels.forEach((lvl, idx) => {
+        const h = lvl.height || 0;
+        if (h > 0 && !seen.has(h)) {
+          seen.add(h);
+          uniqueLevels.push({ ...lvl, levelIndex: idx });
+        }
+      });
+      uniqueLevels.sort((a, b) => b.height - a.height);
+
+      uniqueLevels.forEach(({ height: h, levelIndex }) => {
+        let label = `${h}p`;
+        let badge = `${h}p`;
+        let badgeClass = 'bg-slate-700/50 text-slate-300 border-slate-600';
+        let desc = 'Available Stream Resolution';
+
+        if (h >= 2160) {
+          label = '4K Ultra HD (2160p)';
+          badge = '4K';
+          badgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+          desc = 'Max Bitrate 4K Quality';
+        } else if (h >= 1440) {
+          label = '2K Quad HD (1440p)';
+          badge = '2K';
+          badgeClass = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+          desc = 'Quad HD Stream';
+        } else if (h >= 1080) {
+          label = '1080p Full HD';
+          badge = '1080p';
+          badgeClass = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+          desc = 'Full High Definition';
+        } else if (h >= 720) {
+          label = '720p HD';
+          badge = '720p';
+          badgeClass = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+          desc = 'High Definition';
+        } else if (h >= 480) {
+          label = '480p SD';
+          badge = '480p';
+          badgeClass = 'bg-slate-700/50 text-slate-300 border-slate-600';
+          desc = 'Standard Definition';
+        } else {
+          label = `${h}p Data Saver`;
+          badge = `${h}p`;
+          badgeClass = 'bg-slate-800 text-slate-400 border-slate-700';
+          desc = 'Low Bandwidth';
+        }
+
+        options.push({
+          id: `${h}p`,
+          levelIndex,
+          label,
+          shortLabel: `${h}p`,
+          height: h,
+          badge,
+          badgeClass,
+          description: desc
+        });
+      });
+    } else {
+      // Fallback if not HLS or direct MP4
+      options.push(
+        { id: '1080p', label: '1080p Full HD', shortLabel: '1080p', height: 1080, badge: '1080p', badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', description: 'Full HD' },
+        { id: '720p', label: '720p HD', shortLabel: '720p', height: 720, badge: '720p', badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', description: 'High Definition' },
+        { id: '480p', label: '480p SD', shortLabel: '480p', height: 480, badge: '480p', badgeClass: 'bg-slate-700/50 text-slate-300 border-slate-600', description: 'Standard' }
+      );
     }
-  ];
+
+    return options;
+  }, [qualityLevels, currentQualityLevel]);
 
   // Auto-resolve third-party stream embeds (like player.silverlinehub.org/?tmdb_id=...) to direct HLS
   const [isResolvingStream, setIsResolvingStream] = useState(false);
@@ -215,6 +239,9 @@ export default function SyncedPlayer({
     setResolvedHlsUrl(null);
     setCurrentTime(0);
     setDuration(0);
+    setQualityLevels([]);
+    setSelectedQuality('auto');
+    setCurrentQualityLevel(-1);
     if (hlsRef.current) {
       try {
         hlsRef.current.destroy();
@@ -235,12 +262,19 @@ export default function SyncedPlayer({
       return;
     }
 
-    const tmdbMatch = media?.url?.match(/tmdb_id=(\d+)/) || (media?.id && media?.id.match(/tmdb-(\d+)/)) || (media?.backupUrl && media?.backupUrl.match(/tmdb_id=(\d+)/));
-    if (tmdbMatch) {
-      const tmdbId = tmdbMatch[1];
-      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv');
+    const detectedTmdbId = media?.tmdbId ||
+      (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (media?.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
+      (media?.backupUrl?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (media?.backupUrl?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
+      (media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
+      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]);
+
+    if (detectedTmdbId) {
+      const tmdbId = detectedTmdbId;
+      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv') || media?.backupUrl?.includes('/tv/');
       const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
-      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv);
+      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, 'Source:', media?.source || 'Direct');
       setIsResolvingStream(true);
       fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`)
         .then(r => r.json())
@@ -262,9 +296,16 @@ export default function SyncedPlayer({
       setResolvedHlsUrl(null);
       setIsResolvingStream(false);
     }
-  }, [media?.url, media?.id, media?.backupUrl]);
+  }, [media?.url, media?.id, media?.backupUrl, media?.tmdbId]);
 
-  const hasTmdbStream = Boolean(media?.url?.match(/tmdb_id=(\d+)/) || (media?.id && media?.id.match(/tmdb-(\d+)/)) || (media?.backupUrl && media?.backupUrl.match(/tmdb_id=(\d+)/)));
+  const hasTmdbStream = Boolean(
+    media?.tmdbId ||
+    media?.url?.match(/tmdb_id=(\d+)/) ||
+    media?.url?.match(/tmdb-(?:movie|tv)-(\d+)/) ||
+    media?.backupUrl?.match(/tmdb_id=(\d+)/) ||
+    media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/) ||
+    (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/))
+  );
   const isHtmlPageUrl = Boolean(
     media?.url?.includes('player.silverlinehub.org') ||
     media?.url?.includes('1fmovies.live') ||
@@ -289,81 +330,32 @@ export default function SyncedPlayer({
     setSelectedQuality(qualityId);
     setShowQualityMenu(false);
 
-    const option = QUALITY_OPTIONS.find(q => q.id === qualityId) || QUALITY_OPTIONS[QUALITY_OPTIONS.length - 1];
-
     if (qualityId === 'auto') {
       if (hlsRef.current) {
         hlsRef.current.currentLevel = -1; // Auto adaptive bitrate
       }
-      if (media?.type === 'youtube' && ytPlayerRef.current?.setPlaybackQuality) {
-        try { ytPlayerRef.current.setPlaybackQuality('default'); } catch (e) {}
-      }
+      setCurrentQualityLevel(-1);
       setQualityNotice('✨ Auto Adaptive Quality: dynamic bitrate adjustment');
       setTimeout(() => setQualityNotice(null), 3000);
       return;
     }
 
-    const targetHeight = option.height;
+    const option = availableQualityOptions.find(q => q.id === qualityId);
+    if (!option) return;
 
-    // 1. If HLS stream is loaded
-    if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
-      const levels = hlsRef.current.levels;
-      
-      // If 4K or 2K is chosen:
-      if (targetHeight >= 1440) {
-        // Find highest available level in stream
-        let maxLvlIdx = 0;
-        let maxH = 0;
-        levels.forEach((lvl, idx) => {
-          if ((lvl.height || 0) > maxH) {
-            maxH = lvl.height || 0;
-            maxLvlIdx = idx;
-          }
-        });
-        hlsRef.current.currentLevel = maxLvlIdx;
-        setCurrentQualityLevel(maxLvlIdx);
-        
-        if (qualityId === '4k') {
-          setQualityNotice(`🌟 4K Ultra HD Activated • Max Bandwidth (${maxH}p Stream + Super Resolution)`);
-        } else {
-          setQualityNotice(`💎 2K Quad HD Activated • (${maxH}p High Bitrate)`);
-        }
-      } else {
-        // Find closest level by height
-        let bestIndex = 0;
-        let minDiff = Infinity;
-        levels.forEach((lvl, idx) => {
-          const diff = Math.abs((lvl.height || 0) - targetHeight);
-          if (diff < minDiff) {
-            minDiff = diff;
-            bestIndex = idx;
-          }
-        });
-        hlsRef.current.currentLevel = bestIndex;
-        setCurrentQualityLevel(bestIndex);
-        const actualH = levels[bestIndex]?.height || targetHeight;
-        setQualityNotice(`🎬 Quality switched to ${option.label} (${actualH}p)`);
+    if (hlsRef.current && option.levelIndex !== undefined) {
+      hlsRef.current.currentLevel = option.levelIndex;
+      setCurrentQualityLevel(option.levelIndex);
+      setQualityNotice(`🎬 Resolution set to ${option.label}`);
+    } else if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
+      const matchIndex = hlsRef.current.levels.findIndex(l => l.height === option.height);
+      if (matchIndex !== -1) {
+        hlsRef.current.currentLevel = matchIndex;
+        setCurrentQualityLevel(matchIndex);
       }
-    } else if (media?.type === 'youtube' && ytPlayerRef.current?.setPlaybackQuality) {
-      const ytQualityMap = {
-        '4k': 'hd2160',
-        '1440p': 'hd1440',
-        '1080p': 'hd1080',
-        '720p': 'hd720',
-        '480p': 'large',
-        '360p': 'medium'
-      };
-      const ytQ = ytQualityMap[qualityId] || 'default';
-      try {
-        ytPlayerRef.current.setPlaybackQuality(ytQ);
-      } catch (e) {}
-      setQualityNotice(`YouTube Quality: ${option.label}`);
+      setQualityNotice(`🎬 Resolution set to ${option.label}`);
     } else {
-      if (qualityId === '4k') {
-        setQualityNotice(`🌟 4K Ultra HD Mode Enabled (Super Resolution Clarity)`);
-      } else {
-        setQualityNotice(`Playback Quality: ${option.label}`);
-      }
+      setQualityNotice(`Playback Resolution: ${option.label}`);
     }
 
     setTimeout(() => setQualityNotice(null), 3500);
@@ -825,6 +817,16 @@ export default function SyncedPlayer({
 
       hlsInstance.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
         setCurrentAudioTrack(data.id);
+      });
+
+      hlsInstance.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        setCurrentQualityLevel(data.level);
+      });
+
+      hlsInstance.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+        if (hlsInstance.levels && hlsInstance.levels.length > 0) {
+          setQualityLevels(hlsInstance.levels);
+        }
       });
 
       hlsInstance.on(Hls.Events.ERROR, (event, data) => {
@@ -1924,11 +1926,26 @@ export default function SyncedPlayer({
               <Tv className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white tracking-wide truncate max-w-sm sm:max-w-md">
-                {media?.title || 'Watch Party Stream'}
-              </h2>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-base font-bold text-white tracking-wide truncate max-w-xs sm:max-w-md">
+                  {media?.title || 'Watch Party Stream'}
+                </h2>
+                {media?.source && (
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider border flex-shrink-0 ${
+                    media.source === '7REELS' || media.platform === '7reels'
+                      ? 'bg-rose-500/25 text-rose-300 border-rose-500/40'
+                      : media.source === '1Fmovies' || media.platform === '1fmovies'
+                        ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
+                        : 'bg-indigo-500/25 text-indigo-300 border-indigo-500/40'
+                  }`}>
+                    {media.source}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center space-x-2 text-xs text-slate-400">
-                <span className="capitalize">{media?.platform || media?.type || 'Stream'}</span>
+                <span className="font-medium text-slate-300">
+                  {media?.sourceDomain ? `Source: ${media.sourceDomain}` : (media?.source ? `Source: ${media.source}` : (media?.platform || media?.type || 'Stream'))}
+                </span>
                 <span>•</span>
                 <span>{holdsRemote ? '🎮 You Hold Remote' : `🎮 ${remoteControllerName} Controls`}</span>
               </div>
@@ -2071,7 +2088,9 @@ export default function SyncedPlayer({
                 >
                   {selectedQuality === '4k' && <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />}
                   <span className="text-[11px] font-bold">
-                    {QUALITY_OPTIONS.find(q => q.id === selectedQuality)?.shortLabel || 'Auto'}
+                    {selectedQuality === 'auto'
+                      ? (availableQualityOptions.find(q => q.id === 'auto')?.shortLabel || 'Auto')
+                      : (availableQualityOptions.find(q => q.id === selectedQuality)?.shortLabel || selectedQuality)}
                   </span>
                   <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
                 </button>
@@ -2080,11 +2099,11 @@ export default function SyncedPlayer({
                   <div className="absolute bottom-full mb-2 right-0 bg-slate-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl z-50 min-w-[220px] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
                       <span>Stream Quality</span>
-                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">Up to 4K UHD</span>
+                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">From Fetched Stream</span>
                     </div>
 
                     <div className="space-y-0.5">
-                      {QUALITY_OPTIONS.map((opt) => {
+                      {availableQualityOptions.map((opt) => {
                         const isCurrent = selectedQuality === opt.id;
                         return (
                           <button
