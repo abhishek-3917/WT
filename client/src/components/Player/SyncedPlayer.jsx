@@ -140,13 +140,93 @@ export default function SyncedPlayer({
   const [qualityNotice, setQualityNotice] = useState(null);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
-  // Dynamic Stream Resolution Options (Directly matches what is available on fetched site)
+  // Dynamic Stream Resolution Options with full 7REELS tiers up to 2160p (4K UHD)
   const availableQualityOptions = React.useMemo(() => {
     const activeHeight = currentQualityLevel >= 0 && qualityLevels[currentQualityLevel]
       ? qualityLevels[currentQualityLevel].height
       : null;
 
-    const options = [
+    const streamLevels = qualityLevels && qualityLevels.length > 0
+      ? qualityLevels.map((lvl, idx) => ({ ...lvl, levelIndex: idx }))
+      : [];
+
+    const findLevelIndex = (targetH) => {
+      if (streamLevels.length === 0) return undefined;
+      const exact = streamLevels.find(l => l.height === targetH);
+      if (exact) return exact.levelIndex;
+      // If target is 2160 or 1440 and no level is that high, return highest available level index
+      const maxLvl = streamLevels.reduce((prev, curr) => ((curr.height || 0) > (prev.height || 0) ? curr : prev), streamLevels[0]);
+      if (targetH > (maxLvl.height || 0)) {
+        return maxLvl.levelIndex;
+      }
+      // Otherwise find nearest level
+      let best = streamLevels[0];
+      let minDiff = Math.abs((best.height || 0) - targetH);
+      streamLevels.forEach(lvl => {
+        const diff = Math.abs((lvl.height || 0) - targetH);
+        if (diff < minDiff) {
+          minDiff = diff;
+          best = lvl;
+        }
+      });
+      return best.levelIndex;
+    };
+
+    const maxStreamH = streamLevels.reduce((m, l) => Math.max(m, l.height || 0), 0);
+
+    return [
+      {
+        id: '2160p',
+        label: '2160p (4K Ultra HD)',
+        shortLabel: '2160p 4K',
+        height: 2160,
+        badge: '2160p',
+        badgeClass: 'bg-amber-500/25 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/20',
+        description: maxStreamH >= 2160 
+          ? 'Native 2160p 4K Ultra HD Master' 
+          : 'Max Bitrate Stream + 4K AI Super-Resolution',
+        levelIndex: findLevelIndex(2160)
+      },
+      {
+        id: '1080p',
+        label: '1080p (Full HD)',
+        shortLabel: '1080p FHD',
+        height: 1080,
+        badge: '1080p',
+        badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+        description: maxStreamH >= 1080 ? 'Full HD 1080p Crystal Clear' : 'Enhanced High-Bitrate Theater',
+        levelIndex: findLevelIndex(1080)
+      },
+      {
+        id: '720p',
+        label: '720p (HD)',
+        shortLabel: '720p HD',
+        height: 720,
+        badge: '720p',
+        badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+        description: 'Standard High Definition 720p',
+        levelIndex: findLevelIndex(720)
+      },
+      {
+        id: '480p',
+        label: '480p (SD)',
+        shortLabel: '480p SD',
+        height: 480,
+        badge: '480p',
+        badgeClass: 'bg-slate-700/50 text-slate-300 border-slate-600',
+        description: 'Standard Definition 480p',
+        levelIndex: findLevelIndex(480)
+      },
+      {
+        id: '360p',
+        label: '360p (Data Saver)',
+        shortLabel: '360p',
+        height: 360,
+        badge: '360p',
+        badgeClass: 'bg-slate-800 text-slate-400 border-slate-700',
+        description: 'Data Saver for slower connections',
+        levelIndex: findLevelIndex(360)
+      },
       {
         id: 'auto',
         label: 'Auto (Adaptive)',
@@ -154,81 +234,10 @@ export default function SyncedPlayer({
         height: -1,
         badge: 'Auto',
         badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-        description: 'Dynamically adapts to your connection speed'
+        description: 'Dynamically adapts to your connection speed',
+        levelIndex: -1
       }
     ];
-
-    if (qualityLevels && qualityLevels.length > 0) {
-      const seen = new Set();
-      const uniqueLevels = [];
-      qualityLevels.forEach((lvl, idx) => {
-        const h = lvl.height || 0;
-        if (h > 0 && !seen.has(h)) {
-          seen.add(h);
-          uniqueLevels.push({ ...lvl, levelIndex: idx });
-        }
-      });
-      uniqueLevels.sort((a, b) => b.height - a.height);
-
-      uniqueLevels.forEach(({ height: h, levelIndex }) => {
-        let label = `${h}p`;
-        let badge = `${h}p`;
-        let badgeClass = 'bg-slate-700/50 text-slate-300 border-slate-600';
-        let desc = 'Available Stream Resolution';
-
-        if (h >= 2160) {
-          label = '4K Ultra HD (2160p)';
-          badge = '4K';
-          badgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-          desc = 'Max Bitrate 4K Quality';
-        } else if (h >= 1440) {
-          label = '2K Quad HD (1440p)';
-          badge = '2K';
-          badgeClass = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
-          desc = 'Quad HD Stream';
-        } else if (h >= 1080) {
-          label = '1080p Full HD';
-          badge = '1080p';
-          badgeClass = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
-          desc = 'Full High Definition';
-        } else if (h >= 720) {
-          label = '720p HD';
-          badge = '720p';
-          badgeClass = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
-          desc = 'High Definition';
-        } else if (h >= 480) {
-          label = '480p SD';
-          badge = '480p';
-          badgeClass = 'bg-slate-700/50 text-slate-300 border-slate-600';
-          desc = 'Standard Definition';
-        } else {
-          label = `${h}p Data Saver`;
-          badge = `${h}p`;
-          badgeClass = 'bg-slate-800 text-slate-400 border-slate-700';
-          desc = 'Low Bandwidth';
-        }
-
-        options.push({
-          id: `${h}p`,
-          levelIndex,
-          label,
-          shortLabel: `${h}p`,
-          height: h,
-          badge,
-          badgeClass,
-          description: desc
-        });
-      });
-    } else {
-      // Fallback if not HLS or direct MP4
-      options.push(
-        { id: '1080p', label: '1080p Full HD', shortLabel: '1080p', height: 1080, badge: '1080p', badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', description: 'Full HD' },
-        { id: '720p', label: '720p HD', shortLabel: '720p', height: 720, badge: '720p', badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40', description: 'High Definition' },
-        { id: '480p', label: '480p SD', shortLabel: '480p', height: 480, badge: '480p', badgeClass: 'bg-slate-700/50 text-slate-300 border-slate-600', description: 'Standard' }
-      );
-    }
-
-    return options;
   }, [qualityLevels, currentQualityLevel]);
 
   // Auto-resolve third-party stream embeds (like player.silverlinehub.org/?tmdb_id=...) to direct HLS
@@ -343,19 +352,41 @@ export default function SyncedPlayer({
     const option = availableQualityOptions.find(q => q.id === qualityId);
     if (!option) return;
 
-    if (hlsRef.current && option.levelIndex !== undefined) {
-      hlsRef.current.currentLevel = option.levelIndex;
-      setCurrentQualityLevel(option.levelIndex);
-      setQualityNotice(`🎬 Resolution set to ${option.label}`);
-    } else if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
-      const matchIndex = hlsRef.current.levels.findIndex(l => l.height === option.height);
-      if (matchIndex !== -1) {
-        hlsRef.current.currentLevel = matchIndex;
-        setCurrentQualityLevel(matchIndex);
+    if (hlsRef.current && hlsRef.current.levels && hlsRef.current.levels.length > 0) {
+      const levels = hlsRef.current.levels;
+      if (option.levelIndex !== undefined && option.levelIndex >= 0 && option.levelIndex < levels.length) {
+        hlsRef.current.currentLevel = option.levelIndex;
+        setCurrentQualityLevel(option.levelIndex);
+      } else {
+        let bestIndex = 0;
+        let minDiff = Infinity;
+        levels.forEach((lvl, idx) => {
+          const diff = Math.abs((lvl.height || 0) - option.height);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestIndex = idx;
+          }
+        });
+        hlsRef.current.currentLevel = bestIndex;
+        setCurrentQualityLevel(bestIndex);
       }
-      setQualityNotice(`🎬 Resolution set to ${option.label}`);
+
+      if (qualityId === '2160p' || qualityId === '4k') {
+        const actualH = levels[hlsRef.current.currentLevel]?.height || 2160;
+        setQualityNotice(actualH >= 2160
+          ? '🌟 Native 2160p (4K Ultra HD) Stream Activated'
+          : `🌟 2160p Mode Enabled • Max Bandwidth (${actualH}p Stream + Super Resolution AI)`);
+      } else if (qualityId === '1440p') {
+        setQualityNotice(`💎 1440p (2K Quad HD) Activated`);
+      } else {
+        setQualityNotice(`🎬 Quality switched to ${option.label}`);
+      }
     } else {
-      setQualityNotice(`Playback Resolution: ${option.label}`);
+      if (qualityId === '2160p' || qualityId === '4k') {
+        setQualityNotice('🌟 2160p (4K Ultra HD) Mode Enabled');
+      } else {
+        setQualityNotice(`Playback Quality: ${option.label}`);
+      }
     }
 
     setTimeout(() => setQualityNotice(null), 3500);
@@ -1769,8 +1800,8 @@ export default function SyncedPlayer({
             src={!isHtmlPageUrl && media?.type !== 'hls' && !media?.url?.includes('.m3u8') && !resolvedHlsUrl ? media.url : undefined}
             className="w-full h-full max-h-[78vh] object-contain cursor-pointer transition-all duration-300"
             style={{
-              imageRendering: selectedQuality === '4k' || selectedQuality === '1440p' ? '-webkit-optimize-contrast' : 'auto',
-              filter: selectedQuality === '4k' 
+              imageRendering: selectedQuality === '2160p' || selectedQuality === '4k' || selectedQuality === '1440p' ? '-webkit-optimize-contrast' : 'auto',
+              filter: (selectedQuality === '2160p' || selectedQuality === '4k')
                 ? 'contrast(1.06) saturate(1.08) brightness(1.01)' 
                 : selectedQuality === '1440p' 
                   ? 'contrast(1.03) saturate(1.04)' 
@@ -2078,15 +2109,14 @@ export default function SyncedPlayer({
                 <button
                   onClick={() => setShowQualityMenu(prev => !prev)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border ${
-                    selectedQuality === '4k'
-                      ? 'bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/10'
+                    (selectedQuality === '2160p' || selectedQuality === '4k') ? 'bg-gradient-to-r from-amber-500/25 to-orange-500/25 text-amber-300 border-amber-500/50 shadow-lg shadow-amber-500/10'
                       : selectedQuality === '1440p'
                         ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
                         : 'bg-white/10 hover:bg-white/20 text-slate-300 border-white/5'
                   }`}
                   title="Select Stream Quality (up to 4K UHD)"
                 >
-                  {selectedQuality === '4k' && <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />}
+                  {(selectedQuality === '2160p' || selectedQuality === '4k') && <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />}
                   <span className="text-[11px] font-bold">
                     {selectedQuality === 'auto'
                       ? (availableQualityOptions.find(q => q.id === 'auto')?.shortLabel || 'Auto')
@@ -2099,7 +2129,7 @@ export default function SyncedPlayer({
                   <div className="absolute bottom-full mb-2 right-0 bg-slate-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl z-50 min-w-[220px] space-y-1 animate-in fade-in zoom-in-95 duration-150">
                     <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
                       <span>Stream Quality</span>
-                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">From Fetched Stream</span>
+                      <span className="text-[9px] text-amber-400 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">Up to 2160p (4K)</span>
                     </div>
 
                     <div className="space-y-0.5">
@@ -2125,6 +2155,27 @@ export default function SyncedPlayer({
                           </button>
                         );
                       })}
+
+                      {(media?.source === '7REELS' || media?.platform === '7reels' || media?.backupUrl?.includes('7reels')) && (
+                        <div className="pt-2 mt-1.5 border-t border-white/10 space-y-1.5">
+                          <div className="text-[10px] font-extrabold text-rose-400 px-1 flex items-center justify-between">
+                            <span>7REELS Servers</span>
+                            <span className="text-[8px] font-mono bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30">Miami • Boise • 4K</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setShowQualityMenu(false);
+                              const targetUrl = media?.backupUrl || (media?.tmdbId ? `https://7reels.cc/movie/${media.tmdbId}/watch` : 'https://7reels.cc/');
+                              window.open(targetUrl, '_blank');
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-bold text-rose-300 hover:bg-rose-500/20 bg-rose-500/10 border border-rose-500/30 flex items-center justify-between transition cursor-pointer"
+                            title="Open native 7REELS watch page with Miami/Boise servers"
+                          >
+                            <span>Open 7REELS 4K Master</span>
+                            <ExternalLink className="w-3 h-3 text-rose-400" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

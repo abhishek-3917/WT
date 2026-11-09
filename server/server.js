@@ -490,8 +490,11 @@ app.get('/api/search', async (req, res) => {
                   ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=1&episode=1` 
                   : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`,
                 backupUrl: isTv 
-                  ? `https://7reels.cc/tv/${tmdbId}` 
-                  : `https://7reels.cc/movie/${tmdbId}`,
+                  ? `https://7reels.cc/tv/${tmdbId}/watch?s=1&e=1` 
+                  : `https://7reels.cc/movie/${tmdbId}/watch`,
+                embed4kUrl: isTv 
+                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085` 
+                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085`,
                 type: "stream",
                 platform: '7reels',
                 source: '7REELS',
@@ -572,7 +575,8 @@ app.get('/api/search', async (req, res) => {
               thumbnail: thumb,
               backdrop: back,
               url: `https://player.silverlinehub.org/?tmdb_id=${item.id}`,
-              backupUrl: `https://7reels.cc/movie/${item.id}`,
+              backupUrl: `https://7reels.cc/movie/${item.id}/watch`,
+              embed4kUrl: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085`,
               type: "stream",
               platform: '7reels',
               source: '7REELS',
