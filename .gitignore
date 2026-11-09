@@ -6,3 +6,4 @@ client/dist
 .DS_Store
 bin/
 *.log
+
