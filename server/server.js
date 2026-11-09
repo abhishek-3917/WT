@@ -474,7 +474,7 @@ app.get('/api/search', async (req, res) => {
               : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
 
             return [
-              // 1. Result from 7REELS
+              // 1. Result from 7REELS (Original 2160p 4K Stream)
               {
                 id: `7reels-${tmdbId}`,
                 tmdbId: tmdbId,
@@ -487,22 +487,21 @@ app.get('/api/search', async (req, res) => {
                 thumbnail: thumb,
                 backdrop: back,
                 url: isTv 
-                  ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=1&episode=1` 
-                  : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`,
+                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=2160p` 
+                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
                 backupUrl: isTv 
                   ? `https://7reels.cc/tv/${tmdbId}/watch?s=1&e=1` 
                   : `https://7reels.cc/movie/${tmdbId}/watch`,
-                embed4kUrl: isTv 
-                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085` 
-                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085`,
-                type: "stream",
+                type: "7reels",
                 platform: '7reels',
                 source: '7REELS',
                 sourceBadge: '7REELS',
                 sourceDomain: '7reels.cc',
-                sourceColor: '#e11d48'
+                sourceColor: '#e11d48',
+                originalQuality: '2160p',
+                availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
               },
-              // 2. Result from 1Fmovies
+              // 2. Result from 1Fmovies (Original 1080p FHD Stream)
               {
                 id: `1fmovies-${tmdbId}`,
                 tmdbId: tmdbId,
@@ -518,12 +517,14 @@ app.get('/api/search', async (req, res) => {
                   ? `https://anyembed.xyz/embed/tmdb-tv-${tmdbId}-1-1` 
                   : `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}`,
                 backupUrl: `https://1fmovies.live/`,
-                type: "stream",
+                type: "1fmovies",
                 platform: '1fmovies',
                 source: '1Fmovies',
                 sourceBadge: '1Fmovies',
                 sourceDomain: '1fmovies.live',
-                sourceColor: '#10b981'
+                sourceColor: '#10b981',
+                originalQuality: '1080p',
+                availableQualities: ['1080p', '720p', '480p', '360p', 'auto']
               }
             ];
           });
@@ -562,7 +563,7 @@ app.get('/api/search', async (req, res) => {
             : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
 
           return [
-            // 7REELS Result
+            // 7REELS Result (Original 2160p 4K Stream)
             {
               id: `7reels-${item.id}`,
               tmdbId: item.id,
@@ -574,17 +575,18 @@ app.get('/api/search', async (req, res) => {
               description: desc,
               thumbnail: thumb,
               backdrop: back,
-              url: `https://player.silverlinehub.org/?tmdb_id=${item.id}`,
+              url: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
               backupUrl: `https://7reels.cc/movie/${item.id}/watch`,
-              embed4kUrl: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085`,
-              type: "stream",
+              type: "7reels",
               platform: '7reels',
               source: '7REELS',
               sourceBadge: '7REELS',
               sourceDomain: '7reels.cc',
-              sourceColor: '#e11d48'
+              sourceColor: '#e11d48',
+              originalQuality: '2160p',
+              availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
             },
-            // 1Fmovies Result
+            // 1Fmovies Result (Original 1080p FHD Stream)
             {
               id: `1fmovies-${item.id}`,
               tmdbId: item.id,
@@ -598,12 +600,14 @@ app.get('/api/search', async (req, res) => {
               backdrop: back,
               url: `https://anyembed.xyz/embed/tmdb-movie-${item.id}`,
               backupUrl: `https://1fmovies.live/`,
-              type: "stream",
+              type: "1fmovies",
               platform: '1fmovies',
               source: '1Fmovies',
               sourceBadge: '1Fmovies',
               sourceDomain: '1fmovies.live',
-              sourceColor: '#10b981'
+              sourceColor: '#10b981',
+              originalQuality: '1080p',
+              availableQualities: ['1080p', '720p', '480p', '360p', 'auto']
             }
           ];
         });

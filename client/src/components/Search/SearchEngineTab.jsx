@@ -88,13 +88,14 @@ export default function SearchEngineTab({
 
     let finalItem = { ...mediaItem };
 
-    // If it is a TMDB movie or has tmdbId, resolve direct HLS stream so it plays in our SINGLE synced player!
+    // Only resolve external direct HLS if NOT already a dedicated source (7REELS has its own 2160p stream, 1Fmovies has 1080p stream)
+    const isDedicatedSource = mediaItem.source === '7REELS' || mediaItem.source === '1Fmovies' || mediaItem.platform === '7reels' || mediaItem.platform === '1fmovies';
     const tmdbId = mediaItem.tmdbId || 
       (mediaItem.id && mediaItem.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
       (mediaItem.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
       (mediaItem.url?.match(/tmdb-(?:movie|tv)-(\d+)/)?.[1]) ||
       (mediaItem.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
-    if (tmdbId) {
+    if (tmdbId && !isDedicatedSource) {
       try {
         const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv');
         const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
@@ -120,14 +121,16 @@ export default function SearchEngineTab({
         title: finalItem.title,
         url: finalItem.url,
         backupUrl: finalItem.backupUrl || null,
-        type: finalItem.type || (finalItem.url?.includes('.m3u8') ? 'hls' : finalItem.url?.includes('embed') || finalItem.url?.includes('silverlinehub') ? 'stream' : 'video'),
+        type: finalItem.type || (finalItem.url?.includes('.m3u8') ? 'hls' : finalItem.source === '7REELS' ? '7reels' : finalItem.source === '1Fmovies' ? '1fmovies' : finalItem.url?.includes('embed') ? 'stream' : 'video'),
         thumbnail: finalItem.thumbnail || finalItem.backdrop,
         platform: finalItem.platform || null,
         color: finalItem.color || null,
         year: finalItem.year || null,
         genre: finalItem.genre || null,
         source: finalItem.source || (finalItem.platform === '7reels' ? '7REELS' : finalItem.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream'),
-        sourceDomain: finalItem.sourceDomain || (finalItem.platform === '7reels' ? '7reels.cc' : finalItem.platform === '1fmovies' ? '1fmovies.live' : null)
+        sourceDomain: finalItem.sourceDomain || (finalItem.platform === '7reels' ? '7reels.cc' : finalItem.platform === '1fmovies' ? '1fmovies.live' : null),
+        originalQuality: finalItem.originalQuality || (finalItem.source === '7REELS' ? '2160p' : finalItem.source === '1Fmovies' ? '1080p' : 'Auto'),
+        availableQualities: finalItem.availableQualities || (finalItem.source === '7REELS' ? ['2160p', '1080p', '720p', '480p', 'auto'] : finalItem.source === '1Fmovies' ? ['1080p', '720p', '480p', '360p', 'auto'] : null)
       }
     });
 
