@@ -474,7 +474,7 @@ app.get('/api/search', async (req, res) => {
               : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
 
             return [
-              // 1. Result from 7REELS (Original 2160p 4K Stream)
+              // 1. Result from 7REELS (Original 1080p FHD Stream)
               {
                 id: `7reels-${tmdbId}`,
                 tmdbId: tmdbId,
@@ -487,8 +487,8 @@ app.get('/api/search', async (req, res) => {
                 thumbnail: thumb,
                 backdrop: back,
                 url: isTv 
-                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=2160p` 
-                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
+                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=1080p` 
+                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=1080p`,
                 backupUrl: isTv 
                   ? `https://7reels.cc/tv/${tmdbId}/watch?s=1&e=1` 
                   : `https://7reels.cc/movie/${tmdbId}/watch`,
@@ -498,8 +498,8 @@ app.get('/api/search', async (req, res) => {
                 sourceBadge: '7REELS',
                 sourceDomain: '7reels.cc',
                 sourceColor: '#e11d48',
-                originalQuality: '2160p',
-                availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
+                originalQuality: '1080p',
+                availableQualities: ['1080p', '720p', '480p', 'auto']
               },
               // 2. Result from 1Fmovies (Original 1080p FHD Stream)
               {
@@ -563,7 +563,7 @@ app.get('/api/search', async (req, res) => {
             : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1600&q=80';
 
           return [
-            // 7REELS Result (Original 2160p 4K Stream)
+            // 7REELS Result (Original 1080p FHD Stream)
             {
               id: `7reels-${item.id}`,
               tmdbId: item.id,
@@ -575,7 +575,7 @@ app.get('/api/search', async (req, res) => {
               description: desc,
               thumbnail: thumb,
               backdrop: back,
-              url: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
+              url: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085&quality=1080p`,
               backupUrl: `https://7reels.cc/movie/${item.id}/watch`,
               type: "7reels",
               platform: '7reels',
@@ -583,8 +583,8 @@ app.get('/api/search', async (req, res) => {
               sourceBadge: '7REELS',
               sourceDomain: '7reels.cc',
               sourceColor: '#e11d48',
-              originalQuality: '2160p',
-              availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
+              originalQuality: '1080p',
+              availableQualities: ['1080p', '720p', '480p', 'auto']
             },
             // 1Fmovies Result (Original 1080p FHD Stream)
             {

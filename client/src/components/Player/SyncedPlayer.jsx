@@ -126,22 +126,10 @@ export default function SyncedPlayer({
   const remoteControllerName = room?.remoteControllerName || room?.hostName || 'Host';
   const holdsRemote = currentUser?.socketId === remoteControllerId || (!room?.remoteControllerId && isHost);
   const canControl = holdsRemote || isHost || room?.settings?.controlMode === 'open';
-  const isPortalType = media?.type === '1fmovies' || 
-    media?.type === '7reels' || 
-    media?.source === '7REELS' ||
-    media?.source === '1Fmovies' ||
-    media?.platform === '7reels' ||
-    media?.platform === '1fmovies' ||
-    media?.type === 'platform' || 
-    media?.type === 'portal' || 
-    media?.url?.includes('1fmovies.live') || 
-    media?.url?.includes('7reels.cc') ||
-    media?.url?.includes('vidy.st') ||
-    media?.url?.includes('silverlinehub.org') ||
-    media?.url?.includes('anyembed.xyz');
 
   // State for direct HLS stream resolution (converts third-party iframe embeds into native synced player)
   const [resolvedHlsUrl, setResolvedHlsUrl] = useState(null);
+  const [isResolvingStream, setIsResolvingStream] = useState(false);
   const hlsRef = useRef(null);
   const lastHeartbeatRef = useRef(0);
   const [audioTracks, setAudioTracks] = useState([]);
@@ -149,34 +137,57 @@ export default function SyncedPlayer({
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [qualityLevels, setQualityLevels] = useState([]);
   const [currentQualityLevel, setCurrentQualityLevel] = useState(-1);
-  const [selectedQuality, setSelectedQuality] = useState('auto');
+  const [selectedQuality, setSelectedQuality] = useState('1080p');
   const [qualityNotice, setQualityNotice] = useState(null);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
-  // Original quality options fetched separately for 7REELS and 1Fmovies (no upscaling, no downscaling)
+  const hasTmdbStream = Boolean(
+    media?.tmdbId ||
+    media?.url?.match(/tmdb_id=(\d+)/) ||
+    media?.url?.match(/(?:movie|tv)\/(\d+)/) ||
+    media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/) ||
+    (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/))
+  );
+
+  // Direct HLS / Native video streams (rendered in HTML5 synchronized video player)
+  const isDirectStream = Boolean(
+    resolvedHlsUrl || 
+    media?.type === 'hls' || 
+    media?.type === 'video' ||
+    media?.url?.includes('.m3u8') ||
+    media?.url?.includes('media.silverlinehub.org') ||
+    (media?.url && (media.url.endsWith('.mp4') || media.url.endsWith('.webm')))
+  );
+
+  const isNativeVideo = isDirectStream || (hasTmdbStream && isResolvingStream);
+
+  // In-Website Portal / Embed Window (ONLY for web pages that cannot be resolved to direct HLS)
+  const isPortalType = !isNativeVideo && (
+    media?.type === '1fmovies' || 
+    media?.type === '7reels' || 
+    media?.type === 'platform' || 
+    media?.type === 'portal' || 
+    media?.url?.includes('1fmovies.live') || 
+    media?.url?.includes('7reels.cc') ||
+    media?.url?.includes('vidy.st') ||
+    media?.url?.includes('anyembed.xyz')
+  );
+
+  // Original quality options fetched separately for 7REELS and 1Fmovies (up to 1080p Full HD)
   const availableQualityOptions = React.useMemo(() => {
     const is7Reels = media?.source === '7REELS' || media?.platform === '7reels' || media?.url?.includes('7reels') || media?.url?.includes('vidy.st');
     const is1Fmovies = media?.source === '1Fmovies' || media?.platform === '1fmovies' || media?.url?.includes('1fmovies') || media?.url?.includes('anyembed');
 
     if (is7Reels) {
-      // 7REELS Original Qualities: 2160p (4K UHD), 1080p (Full HD), 720p (HD), 480p (SD), Auto
+      // 7REELS Original Qualities capped up to 1080p: 1080p (Full HD), 720p (HD), 480p (SD), Auto
       return [
-        {
-          id: '2160p',
-          label: '2160p (4K Ultra HD)',
-          shortLabel: '2160p',
-          height: 2160,
-          badge: '2160p',
-          badgeClass: 'bg-rose-500/25 text-rose-300 border-rose-500/40 shadow-sm shadow-rose-500/20',
-          description: '7REELS Original 2160p (4K UHD) Master'
-        },
         {
           id: '1080p',
           label: '1080p (Full HD)',
           shortLabel: '1080p',
           height: 1080,
           badge: '1080p',
-          badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+          badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 shadow-sm shadow-indigo-500/20',
           description: '7REELS Original 1080p (Full HD)'
         },
         {
@@ -260,14 +271,13 @@ export default function SyncedPlayer({
       ];
     }
 
-    // Direct HLS stream: fetch EXACT levels from playlist (no upscaling, no downscaling)
+    // Direct HLS stream: fetch EXACT levels from playlist capped up to 1080p
     if (qualityLevels && qualityLevels.length > 0) {
-      const uniqueHeights = [...new Set(qualityLevels.map(l => l.height).filter(h => h > 0))].sort((a, b) => b - a);
+      const uniqueHeights = [...new Set(qualityLevels.map(l => l.height).filter(h => h > 0 && h <= 1080))].sort((a, b) => b - a);
       const hlsOptions = uniqueHeights.map(h => {
         const lvlIdx = qualityLevels.findIndex(l => l.height === h);
         let badgeClass = 'bg-slate-700/50 text-slate-300 border-slate-600';
-        if (h >= 2160) badgeClass = 'bg-amber-500/25 text-amber-300 border-amber-500/40';
-        else if (h >= 1080) badgeClass = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+        if (h >= 1080) badgeClass = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
         else if (h >= 720) badgeClass = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
 
         return {
@@ -309,9 +319,6 @@ export default function SyncedPlayer({
     ];
   }, [media?.source, media?.platform, media?.url, qualityLevels, currentQualityLevel]);
 
-  // Auto-resolve third-party stream embeds (like player.silverlinehub.org/?tmdb_id=...) to direct HLS
-  const [isResolvingStream, setIsResolvingStream] = useState(false);
-
   useEffect(() => {
     // Immediately clear previous stream & reset player state when movie/show changes
     setResolvedHlsUrl(null);
@@ -322,7 +329,7 @@ export default function SyncedPlayer({
     setQualityLevels([]);
     setSelectedQuality('auto');
     setCurrentQualityLevel(-1);
-    if (media?.source === '7REELS' || media?.platform === '7reels') setSelectedQuality('2160p');
+    if (media?.source === '7REELS' || media?.platform === '7reels') setSelectedQuality('1080p');
     else if (media?.source === '1Fmovies' || media?.platform === '1fmovies') setSelectedQuality('1080p');
     else setSelectedQuality('auto');
     if (hlsRef.current) {
@@ -379,14 +386,6 @@ export default function SyncedPlayer({
     }
   }, [media?.url, media?.id, media?.backupUrl, media?.tmdbId]);
 
-  const hasTmdbStream = Boolean(
-    media?.tmdbId ||
-    media?.url?.match(/tmdb_id=(\d+)/) ||
-    media?.url?.match(/tmdb-(?:movie|tv)-(\d+)/) ||
-    media?.backupUrl?.match(/tmdb_id=(\d+)/) ||
-    media?.backupUrl?.match(/(?:movie|tv)\/(\d+)/) ||
-    (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/))
-  );
   const isHtmlPageUrl = Boolean(
     media?.url?.includes('player.silverlinehub.org') ||
     media?.url?.includes('1fmovies.live') ||
@@ -398,8 +397,6 @@ export default function SyncedPlayer({
     media?.url?.includes('anyembed.xyz') ||
     media?.url?.includes('autoembed.co')
   );
-  // Only render as native video when direct HLS is resolved, or it's a native mp4/webm, or currently resolving
-  const isNativeVideo = media?.type === 'video' || media?.type === 'hls' || Boolean(media?.url?.includes('.m3u8')) || Boolean(resolvedHlsUrl) || (hasTmdbStream && isResolvingStream);
 
   const handleSelectAudioTrack = (trackId) => {
     if (hlsRef.current) {
@@ -457,9 +454,7 @@ export default function SyncedPlayer({
     if (qualityId === 'auto') {
       if (hlsRef.current) hlsRef.current.currentLevel = -1;
       setCurrentQualityLevel(-1);
-    if (media?.source === '7REELS' || media?.platform === '7reels') setSelectedQuality('2160p');
-    else if (media?.source === '1Fmovies' || media?.platform === '1fmovies') setSelectedQuality('1080p');
-    else setSelectedQuality('auto');
+      setSelectedQuality('auto');
       setQualityNotice('✨ Auto Adaptive Stream Quality');
       setTimeout(() => setQualityNotice(null), 3000);
       return;
@@ -1802,9 +1797,48 @@ export default function SyncedPlayer({
             <span>Live Tab Stream ({isScreenSharing ? 'You are Broadcasting' : 'Partner is Broadcasting'})</span>
           </div>
         </div>
+      ) : isNativeVideo ? (
+        /* ============================================================== */
+        /* MEDIA TYPE 2: NATIVE HTML5 & HLS SYNCHRONIZED STREAM           */
+        /* ============================================================== */
+        <div className="w-full h-full flex items-center justify-center relative bg-black overflow-hidden">
+          <video
+            ref={videoRef}
+            key={media?.id || 'native-player'}
+            src={!isHtmlPageUrl && media?.type !== 'hls' && !media?.url?.includes('.m3u8') && !resolvedHlsUrl ? media.url : undefined}
+            className="w-full h-full max-h-[78vh] object-contain cursor-pointer transition-all duration-300"
+            style={{
+              imageRendering: 'auto',
+              filter: 'none'
+            }}
+            onClick={handleTogglePlay}
+            onDoubleClick={toggleFullscreen}
+            playsInline
+            preload="auto"
+          />
+
+          {(!resolvedHlsUrl && hasTmdbStream && !media?.url?.includes('.m3u8')) && (
+            <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-8 text-center text-white space-y-4 z-10">
+              <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <div className="font-bold text-base text-indigo-300">Synchronizing Cinema Stream...</div>
+              <p className="text-xs text-slate-400 max-w-sm">Connecting lockstep video stream across all room members.</p>
+            </div>
+          )}
+        </div>
+      ) : media?.type === 'youtube' ? (
+        /* ============================================================== */
+        /* MEDIA TYPE 3: YOUTUBE SYNCHRONIZED PLAYER                      */
+        /* ============================================================== */
+        <div className="w-full h-full flex items-center justify-center relative">
+          <div id="youtube-player-container" className="w-full h-full aspect-video max-h-[78vh]" />
+          <div 
+            onClick={handleTogglePlay}
+            className="absolute inset-0 z-10 cursor-pointer"
+          />
+        </div>
       ) : isPortalType ? (
         /* ============================================================== */
-        /* MEDIA TYPE 2: IN-WEBSITE STREAMING WINDOW                      */
+        /* MEDIA TYPE 4: IN-WEBSITE STREAMING WINDOW                      */
         /* (Netflix, Disney+ Hotstar, Amazon Prime Video, 1Fmovies)        */
         /* ============================================================== */
         <div className="w-full h-full flex flex-col bg-slate-950 relative">
@@ -1979,45 +2013,6 @@ export default function SyncedPlayer({
               allow="autoplay *; encrypted-media *; fullscreen *; picture-in-picture *; clipboard-read; clipboard-write; credentials"
             />
           </div>
-        </div>
-      ) : isNativeVideo ? (
-        /* ============================================================== */
-        /* MEDIA TYPE 3: NATIVE HTML5 & HLS SYNCHRONIZED STREAM           */
-        /* ============================================================== */
-        <div className="w-full h-full flex items-center justify-center relative bg-black overflow-hidden">
-          <video
-            ref={videoRef}
-            key={media?.id || 'native-player'}
-            src={!isHtmlPageUrl && media?.type !== 'hls' && !media?.url?.includes('.m3u8') && !resolvedHlsUrl ? media.url : undefined}
-            className="w-full h-full max-h-[78vh] object-contain cursor-pointer transition-all duration-300"
-            style={{
-              imageRendering: 'auto',
-              filter: 'none'
-            }}
-            onClick={handleTogglePlay}
-            onDoubleClick={toggleFullscreen}
-            playsInline
-            preload="auto"
-          />
-
-          {(!resolvedHlsUrl && hasTmdbStream) && (
-            <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-8 text-center text-white space-y-4 z-10">
-              <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <div className="font-bold text-base text-indigo-300">Synchronizing Cinema Stream...</div>
-              <p className="text-xs text-slate-400 max-w-sm">Connecting lockstep video stream across all room members.</p>
-            </div>
-          )}
-        </div>
-      ) : media?.type === 'youtube' ? (
-        /* ============================================================== */
-        /* MEDIA TYPE 4: YOUTUBE SYNCHRONIZED PLAYER                      */
-        /* ============================================================== */
-        <div className="w-full h-full flex items-center justify-center relative">
-          <div id="youtube-player-container" className="w-full h-full aspect-video max-h-[78vh]" />
-          <div 
-            onClick={handleTogglePlay}
-            className="absolute inset-0 z-10 cursor-pointer"
-          />
         </div>
       ) : media?.type === 'stream' ? (
         /* ============================================================== */
@@ -2346,7 +2341,7 @@ export default function SyncedPlayer({
                         <div className="pt-2 mt-1.5 border-t border-white/10 space-y-1.5">
                           <div className="text-[10px] font-extrabold text-rose-400 px-1 flex items-center justify-between">
                             <span>7REELS Servers</span>
-                            <span className="text-[8px] font-mono bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30">Miami • Boise • 4K</span>
+                            <span className="text-[8px] font-mono bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30">Miami • Boise • 1080p</span>
                           </div>
                           <button
                             onClick={() => {
@@ -2357,7 +2352,7 @@ export default function SyncedPlayer({
                             className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-bold text-rose-300 hover:bg-rose-500/20 bg-rose-500/10 border border-rose-500/30 flex items-center justify-between transition cursor-pointer"
                             title="Open native 7REELS watch page with Miami/Boise servers"
                           >
-                            <span>Open 7REELS 4K Master</span>
+                            <span>Open 7REELS Full HD</span>
                             <ExternalLink className="w-3 h-3 text-rose-400" />
                           </button>
                         </div>

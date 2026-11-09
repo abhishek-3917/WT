@@ -129,8 +129,8 @@ export default function SearchEngineTab({
         genre: finalItem.genre || null,
         source: finalItem.source || (finalItem.platform === '7reels' ? '7REELS' : finalItem.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream'),
         sourceDomain: finalItem.sourceDomain || (finalItem.platform === '7reels' ? '7reels.cc' : finalItem.platform === '1fmovies' ? '1fmovies.live' : null),
-        originalQuality: finalItem.originalQuality || (finalItem.source === '7REELS' ? '2160p' : finalItem.source === '1Fmovies' ? '1080p' : 'Auto'),
-        availableQualities: finalItem.availableQualities || (finalItem.source === '7REELS' ? ['2160p', '1080p', '720p', '480p', 'auto'] : finalItem.source === '1Fmovies' ? ['1080p', '720p', '480p', '360p', 'auto'] : null)
+        originalQuality: finalItem.originalQuality || (finalItem.source === '7REELS' ? '1080p' : finalItem.source === '1Fmovies' ? '1080p' : 'Auto'),
+        availableQualities: finalItem.availableQualities || (finalItem.source === '7REELS' ? ['1080p', '720p', '480p', 'auto'] : finalItem.source === '1Fmovies' ? ['1080p', '720p', '480p', '360p', 'auto'] : null)
       }
     });
 
