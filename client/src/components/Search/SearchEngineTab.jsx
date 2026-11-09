@@ -91,7 +91,9 @@ export default function SearchEngineTab({
       (mediaItem.url?.match(/tmdb_id=(\d+)/)?.[1]);
     if (tmdbId) {
       try {
-        const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}`);
+        const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv');
+        const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
+        const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`);
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.streamUrl) {

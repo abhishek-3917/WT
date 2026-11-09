@@ -288,8 +288,16 @@ app.get('/api/resolve-stream', async (req, res) => {
     return res.status(400).json({ error: 'tmdbId required' });
   }
 
+  const isTv = req.query.type === 'series' || req.query.isTv === 'true';
+  const season = req.query.season || 1;
+  const episode = req.query.episode || 1;
+
+  const targetUrl = isTv
+    ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=${season}&episode=${episode}`
+    : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`;
+
   try {
-    const streamRes = await fetch(`https://player.silverlinehub.org/?tmdb_id=${tmdbId}`, {
+    const streamRes = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
       },
@@ -312,7 +320,7 @@ app.get('/api/resolve-stream', async (req, res) => {
           ? subMatch[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\+$/, '').replace(/"$/, '') 
           : null;
 
-        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} to direct HLS: ${masterUrl}`);
+        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}) to direct HLS: ${masterUrl}`);
         return res.json({
           success: true,
           type: 'hls',
@@ -321,10 +329,10 @@ app.get('/api/resolve-stream', async (req, res) => {
         });
       }
     }
-    return res.json({ success: false, fallback: `https://player.silverlinehub.org/?tmdb_id=${tmdbId}` });
+    return res.json({ success: false, fallback: targetUrl });
   } catch (err) {
     console.warn('[Resolve Stream Error]', err.message);
-    return res.json({ success: false, fallback: `https://player.silverlinehub.org/?tmdb_id=${tmdbId}` });
+    return res.json({ success: false, fallback: targetUrl });
   }
 });
 
@@ -854,13 +862,18 @@ io.on('connection', (socket) => {
 
     console.log(`[Media Changed] in ${roomId} to "${media.title}" by ${member?.name}`);
 
-    // If media is a TMDB movie and not yet direct HLS, attempt server-side resolution
+    // If media is a TMDB movie/series and not yet direct HLS, attempt server-side resolution
     const rawTmdbId = media.tmdbId || 
       (media.id && media.id.startsWith('tmdb-') ? media.id.replace('tmdb-', '') : null) ||
       (media.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
       (media.backupUrl?.match(/tmdb_id=(\d+)/)?.[1]);
     if (rawTmdbId && room.media.type !== 'hls') {
-      fetch(`https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}`, {
+      const isTv = media.platform === 'tv' || media.url?.includes('type=series') || media.backupUrl?.includes('tmdb-tv');
+      const targetUrl = isTv
+        ? `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}&type=series&season=1&episode=1`
+        : `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}`;
+
+      fetch(targetUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
         signal: AbortSignal.timeout(3500)
       }).then(r => r.text()).then(html => {

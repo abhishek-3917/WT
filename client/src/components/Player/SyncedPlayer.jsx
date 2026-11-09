@@ -211,6 +211,24 @@ export default function SyncedPlayer({
   const [isResolvingStream, setIsResolvingStream] = useState(false);
 
   useEffect(() => {
+    // Immediately clear previous stream & reset player state when movie/show changes
+    setResolvedHlsUrl(null);
+    setCurrentTime(0);
+    setDuration(0);
+    if (hlsRef.current) {
+      try {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      } catch (e) {}
+    }
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      } catch (e) {}
+    }
+
     if (media?.url?.includes('.m3u8')) {
       setResolvedHlsUrl(media.url);
       setIsResolvingStream(false);
@@ -220,17 +238,25 @@ export default function SyncedPlayer({
     const tmdbMatch = media?.url?.match(/tmdb_id=(\d+)/) || (media?.id && media?.id.match(/tmdb-(\d+)/)) || (media?.backupUrl && media?.backupUrl.match(/tmdb_id=(\d+)/));
     if (tmdbMatch) {
       const tmdbId = tmdbMatch[1];
-      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId);
+      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv');
+      const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
+      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv);
       setIsResolvingStream(true);
-      fetch(`/api/resolve-stream?tmdbId=${tmdbId}`)
+      fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`)
         .then(r => r.json())
         .then(data => {
           if (data.success && data.streamUrl) {
             console.log(`[Auto-Stream Resolve] Successfully converted "${media?.title}" to direct native HLS:`, data.streamUrl);
             setResolvedHlsUrl(data.streamUrl);
+          } else {
+            console.log(`[Auto-Stream Resolve] Direct HLS not available for "${media?.title}", falling back to embed`);
+            setResolvedHlsUrl(null);
           }
         })
-        .catch(err => console.warn('[Auto-Stream Resolve Error]', err))
+        .catch(err => {
+          console.warn('[Auto-Stream Resolve Error]', err);
+          setResolvedHlsUrl(null);
+        })
         .finally(() => setIsResolvingStream(false));
     } else {
       setResolvedHlsUrl(null);
@@ -245,9 +271,11 @@ export default function SyncedPlayer({
     media?.url?.includes('netflix.com') ||
     media?.url?.includes('primevideo.com') ||
     media?.url?.includes('hotstar.com') ||
-    hasTmdbStream
+    media?.url?.includes('anyembed.xyz') ||
+    media?.url?.includes('autoembed.co')
   );
-  const isNativeVideo = media?.type === 'video' || media?.type === 'hls' || Boolean(media?.url?.includes('.m3u8')) || Boolean(resolvedHlsUrl) || hasTmdbStream;
+  // Only render as native video when direct HLS is resolved, or it's a native mp4/webm, or currently resolving
+  const isNativeVideo = media?.type === 'video' || media?.type === 'hls' || Boolean(media?.url?.includes('.m3u8')) || Boolean(resolvedHlsUrl) || (hasTmdbStream && isResolvingStream);
 
   const handleSelectAudioTrack = (trackId) => {
     if (hlsRef.current) {
@@ -742,11 +770,28 @@ export default function SyncedPlayer({
   useEffect(() => {
     const video = videoRef.current;
     const targetUrl = resolvedHlsUrl || (media?.url?.includes('.m3u8') ? media.url : null);
-    if (!video || !targetUrl) return;
+    if (!video) return;
+
+    if (!targetUrl) {
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        } catch (e) {}
+      }
+      return;
+    }
 
     let hlsInstance = null;
 
     if (Hls.isSupported()) {
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        } catch (e) {}
+      }
+
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -804,11 +849,20 @@ export default function SyncedPlayer({
 
     return () => {
       if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsRef.current = null;
+        try {
+          hlsInstance.destroy();
+          hlsRef.current = null;
+        } catch (e) {}
+      }
+      if (video) {
+        try {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        } catch (e) {}
       }
     };
-  }, [resolvedHlsUrl, media?.url, isNativeVideo, safePlay]);
+  }, [resolvedHlsUrl, media?.url, media?.id]);
 
   // HTML5 Video Event Listeners
   useEffect(() => {
@@ -1698,6 +1752,7 @@ export default function SyncedPlayer({
         <div className="w-full h-full flex items-center justify-center relative bg-black overflow-hidden">
           <video
             ref={videoRef}
+            key={media?.id || 'native-player'}
             src={!isHtmlPageUrl && media?.type !== 'hls' && !media?.url?.includes('.m3u8') && !resolvedHlsUrl ? media.url : undefined}
             className="w-full h-full max-h-[78vh] object-contain cursor-pointer transition-all duration-300"
             style={{
