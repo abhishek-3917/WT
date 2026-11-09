@@ -7,7 +7,8 @@ import {
   Tv, Film, AlertTriangle, Loader2, Monitor, ExternalLink,
   Radio, Globe, Compass, Timer, Copy, Check, Zap, Languages,
   Mic, MicOff, Video, VideoOff, User, Crown, Key, Lock,
-  ChevronDown, ChevronUp, Camera, CameraOff, X, GripHorizontal, Move
+  ChevronDown, ChevronUp, Camera, CameraOff, X, GripHorizontal, Move,
+  List, SkipForward, Layers
 } from 'lucide-react';
 
 export default function SyncedPlayer({ 
@@ -140,6 +141,118 @@ export default function SyncedPlayer({
   const [selectedQuality, setSelectedQuality] = useState('1080p');
   const [qualityNotice, setQualityNotice] = useState(null);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
+
+  // In-Player TV Series Season & Episode Selector Drawer
+  const [showEpisodesDrawer, setShowEpisodesDrawer] = useState(false);
+  const [playerTvDetails, setPlayerTvDetails] = useState(null);
+  const [playerActiveSeason, setPlayerActiveSeason] = useState(media?.season || 1);
+  const [playerSeasonEpisodes, setPlayerSeasonEpisodes] = useState([]);
+  const [playerLoadingEpisodes, setPlayerLoadingEpisodes] = useState(false);
+
+  const handleToggleEpisodesDrawer = async () => {
+    const nextState = !showEpisodesDrawer;
+    setShowEpisodesDrawer(nextState);
+    if (!nextState) return;
+
+    const detectedTmdbId = media?.tmdbId ||
+      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
+      (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (media?.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
+
+    if (!detectedTmdbId) return;
+
+    const currentSeason = media?.season || 1;
+    setPlayerActiveSeason(currentSeason);
+    setPlayerLoadingEpisodes(true);
+
+    try {
+      const res = await fetch(`/api/tv-details?tmdbId=${detectedTmdbId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPlayerTvDetails(data);
+      }
+      const epRes = await fetch(`/api/tv-season?tmdbId=${detectedTmdbId}&season=${currentSeason}`);
+      if (epRes.ok) {
+        const epData = await epRes.json();
+        setPlayerSeasonEpisodes(epData.episodes || []);
+      }
+    } catch (e) {
+      console.warn('[Player TV Details Error]', e);
+    } finally {
+      setPlayerLoadingEpisodes(false);
+    }
+  };
+
+  const handlePlayerSelectSeason = async (seasonNum) => {
+    setPlayerActiveSeason(seasonNum);
+    const detectedTmdbId = media?.tmdbId ||
+      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
+      (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (media?.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
+    if (!detectedTmdbId) return;
+
+    setPlayerLoadingEpisodes(true);
+    try {
+      const epRes = await fetch(`/api/tv-season?tmdbId=${detectedTmdbId}&season=${seasonNum}`);
+      if (epRes.ok) {
+        const epData = await epRes.json();
+        setPlayerSeasonEpisodes(epData.episodes || []);
+      }
+    } catch (e) {
+      console.warn('[Player Season Episodes Error]', e);
+    } finally {
+      setPlayerLoadingEpisodes(false);
+    }
+  };
+
+  const handlePlayerSelectEpisode = async (seasonNum, episodeNum, epName) => {
+    if (!canControl) {
+      triggerPermissionNotice();
+      return;
+    }
+
+    const detectedTmdbId = media?.tmdbId ||
+      (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
+      (media?.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (media?.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
+
+    setShowEpisodesDrawer(false);
+
+    try {
+      const res = await fetch(`/api/resolve-stream?tmdbId=${detectedTmdbId}&type=series&season=${seasonNum}&episode=${episodeNum}`);
+      const data = await res.json();
+      const newUrl = (data.success && data.streamUrl) ? data.streamUrl : media.url;
+
+      socket.emit('media_change', {
+        roomId: room.id,
+        media: {
+          ...media,
+          id: `media-${detectedTmdbId}-s${seasonNum}e${episodeNum}-${Date.now()}`,
+          url: newUrl,
+          type: newUrl?.includes('.m3u8') ? 'hls' : media.type,
+          isTv: true,
+          season: seasonNum,
+          episode: episodeNum,
+          episodeTitle: epName,
+          title: media.title,
+          currentTime: 0,
+          isPlaying: true
+        }
+      });
+    } catch (e) {
+      console.warn('[Player Select Episode Error]', e);
+    }
+  };
+
+  const handlePlayerNextEpisode = () => {
+    if (!canControl) {
+      triggerPermissionNotice();
+      return;
+    }
+    const currentSeason = media?.season || 1;
+    const currentEpisode = media?.episode || 1;
+    handlePlayerSelectEpisode(currentSeason, currentEpisode + 1, `Episode ${currentEpisode + 1}`);
+  };
 
   const hasTmdbStream = Boolean(
     media?.tmdbId ||
@@ -360,15 +473,27 @@ export default function SyncedPlayer({
 
     if (detectedTmdbId && media?.type !== 'platform' && !media?.url?.includes('.m3u8')) {
       const tmdbId = detectedTmdbId;
-      const isTv = media?.platform === 'tv' || media?.genre?.includes('Series') || media?.url?.includes('type=series') || media?.backupUrl?.includes('tmdb-tv') || media?.url?.includes('/tv/') || media?.backupUrl?.includes('/tv/');
-      const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
-      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, 'Source:', media?.source || 'Direct');
+      const isTv = Boolean(
+        media?.isTv || 
+        media?.platform === 'tv' || 
+        media?.genre?.includes('Series') || 
+        media?.duration === 'Series' || 
+        media?.url?.includes('type=series') || 
+        media?.backupUrl?.includes('tmdb-tv') || 
+        media?.url?.includes('/tv/') || 
+        media?.backupUrl?.includes('/tv/') ||
+        media?.season
+      );
+      const season = media?.season || 1;
+      const episode = media?.episode || 1;
+      const seriesQuery = isTv ? `&type=series&season=${season}&episode=${episode}` : '';
+      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, `S${season}:E${episode}`, 'Source:', media?.source || 'Direct');
       setIsResolvingStream(true);
       fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`)
         .then(r => r.json())
         .then(data => {
           if (data.success && data.streamUrl) {
-            console.log(`[Auto-Stream Resolve] Successfully converted "${media?.title}" to direct native HLS:`, data.streamUrl);
+            console.log(`[Auto-Stream Resolve] Successfully converted "${media?.title}" (S${season}:E${episode}) to direct native HLS:`, data.streamUrl);
             setResolvedHlsUrl(data.streamUrl);
           } else {
             console.log(`[Auto-Stream Resolve] Direct HLS not available for "${media?.title}", falling back to embed`);
@@ -384,7 +509,7 @@ export default function SyncedPlayer({
       setResolvedHlsUrl(null);
       setIsResolvingStream(false);
     }
-  }, [media?.url, media?.id, media?.backupUrl, media?.tmdbId]);
+  }, [media?.url, media?.id, media?.backupUrl, media?.tmdbId, media?.season, media?.episode]);
 
   const isHtmlPageUrl = Boolean(
     media?.url?.includes('player.silverlinehub.org') ||
@@ -2143,6 +2268,11 @@ export default function SyncedPlayer({
                 <h2 className="text-base font-bold text-white tracking-wide truncate max-w-xs sm:max-w-md">
                   {media?.title || 'Watch Party Stream'}
                 </h2>
+                {(media?.isTv || media?.season) && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/25 text-indigo-300 border border-indigo-500/40 flex-shrink-0">
+                    S{media.season || 1}:E{media.episode || 1}{media.episodeTitle ? ` • ${media.episodeTitle}` : ''}
+                  </span>
+                )}
                 {media?.source && (
                   <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider border flex-shrink-0 ${
                     media.source === '7REELS' || media.platform === '7reels'
@@ -2286,6 +2416,37 @@ export default function SyncedPlayer({
                 </div>
               )}
 
+              {/* TV Series Episode & Season Quick Selector */}
+              {(media?.isTv || media?.season || media?.genre?.includes('Series') || media?.duration === 'Series') && (
+                <div className="flex items-center space-x-1">
+                  <button
+                    onClick={handleToggleEpisodesDrawer}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer border bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border-indigo-500/40 shadow-sm"
+                    title="Select Season & Episode"
+                  >
+                    <List className="w-3.5 h-3.5 text-indigo-300" />
+                    <span className="text-[11px] font-bold">
+                      S{media.season || 1}:E{media.episode || 1}
+                    </span>
+                    <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+                  </button>
+
+                  <button
+                    onClick={handlePlayerNextEpisode}
+                    disabled={!canControl}
+                    className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 transition cursor-pointer border ${
+                      canControl
+                        ? 'bg-white/10 hover:bg-white/20 text-slate-200 border-white/10 active:scale-95'
+                        : 'bg-white/5 text-slate-500 border-white/5 cursor-not-allowed'
+                    }`}
+                    title="Play Next Episode"
+                  >
+                    <span className="text-[10px] font-bold">Next</span>
+                    <SkipForward className="w-3 h-3 text-indigo-300" />
+                  </button>
+                </div>
+              )}
+
               {/* Stream Quality Selector up to 1080p Full HD */}
               <div className="relative">
                 <button
@@ -2388,6 +2549,150 @@ export default function SyncedPlayer({
                 {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* IN-PLAYER TV SERIES SEASONS & EPISODES SELECTION DRAWER         */}
+      {/* ============================================================== */}
+      {showEpisodesDrawer && (
+        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md z-40 flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          {/* Header */}
+          <div className="p-3 sm:p-4 bg-slate-900 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center space-x-2.5 min-w-0">
+              <Tv className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              <div className="min-w-0">
+                <h3 className="font-bold text-white text-sm truncate">
+                  {media?.title} — Seasons & Episodes
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  {holdsRemote ? '🎮 Select episode to play for room' : `🎮 Viewing episodes (Host: ${remoteControllerName})`}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowEpisodesDrawer(false)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Season Selector Tabs */}
+          <div className="p-2.5 bg-slate-900/60 border-b border-white/5 flex items-center space-x-2 overflow-x-auto scrollbar-none">
+            {(playerTvDetails?.seasons || [{ seasonNumber: 1, name: 'Season 1' }]).map((s) => {
+              const isSelected = Number(playerActiveSeason) === Number(s.seasonNumber);
+              return (
+                <button
+                  key={s.seasonNumber}
+                  onClick={() => handlePlayerSelectSeason(s.seasonNumber)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer border flex items-center space-x-1.5 ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-600/30'
+                      : 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700'
+                  }`}
+                >
+                  <span>{s.name || `Season ${s.seasonNumber}`}</span>
+                  {s.episodeCount > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      isSelected ? 'bg-indigo-950/60 text-indigo-200' : 'bg-slate-900 text-slate-400'
+                    }`}>
+                      {s.episodeCount} eps
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Episode Cards List */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {playerLoadingEpisodes ? (
+              <div className="flex flex-col items-center justify-center py-16 space-y-2">
+                <Loader2 className="w-7 h-7 text-indigo-400 animate-spin" />
+                <span className="text-xs text-slate-400">Loading Season {playerActiveSeason} episodes...</span>
+              </div>
+            ) : playerSeasonEpisodes.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                No episodes found for this season.
+              </div>
+            ) : (
+              playerSeasonEpisodes.map((ep) => {
+                const isPlayingThisEp = 
+                  Number(media?.season || 1) === Number(playerActiveSeason) &&
+                  Number(media?.episode || 1) === Number(ep.episodeNumber);
+
+                return (
+                  <div
+                    key={ep.episodeNumber}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                      isPlayingThisEp
+                        ? 'bg-indigo-950/40 border-indigo-500/60 ring-1 ring-indigo-500/30'
+                        : 'bg-slate-800/40 hover:bg-slate-800/80 border-white/5'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      {ep.still ? (
+                        <div className="w-16 h-11 rounded-lg overflow-hidden bg-slate-900 flex-shrink-0 relative">
+                          <img
+                            src={ep.still}
+                            alt={ep.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                          <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[9px] font-mono px-1 rounded text-white">
+                            E{ep.episodeNumber}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                          E{ep.episodeNumber}
+                        </span>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-white truncate">
+                          {ep.episodeNumber}. {ep.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400 flex items-center space-x-2 mt-0.5">
+                          {ep.runtime && <span>{ep.runtime}</span>}
+                          {ep.airDate && <span>• {ep.airDate}</span>}
+                        </div>
+                        {ep.overview && (
+                          <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">
+                            {ep.overview}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex-shrink-0">
+                      {isPlayingThisEp ? (
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center space-x-1">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Playing</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handlePlayerSelectEpisode(playerActiveSeason, ep.episodeNumber, ep.name)}
+                          disabled={!canControl}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1 transition cursor-pointer shadow ${
+                            canControl
+                              ? 'bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95 shadow-indigo-600/30'
+                              : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Play</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

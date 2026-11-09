@@ -3,7 +3,8 @@ import socket from '../../services/socket';
 import { 
   Search, Film, Globe, Play, CheckCircle, 
   Sparkles, ExternalLink, SlidersHorizontal, AlertCircle,
-  Tv, Monitor, Radio, Compass, RefreshCw, X
+  Tv, Monitor, Radio, Compass, RefreshCw, X, List, ChevronRight,
+  Layers, Loader2, ArrowLeft
 } from 'lucide-react';
 
 const YoutubeIcon = ({ className = "w-3 h-3" }) => (
@@ -40,6 +41,78 @@ export default function SearchEngineTab({
   const holdsRemote = (currentUser?.socketId === (room?.remoteControllerId || room?.hostId)) || (!room?.remoteControllerId && isHost);
   const canControl = holdsRemote || isHost || room?.settings?.controlMode === 'open';
   const currentMediaId = room?.media?.id;
+
+  // Series Season & Episode Selection State
+  const [selectedSeriesForEpisodes, setSelectedSeriesForEpisodes] = useState(null);
+  const [seriesTvDetails, setSeriesTvDetails] = useState(null);
+  const [loadingTvDetails, setLoadingTvDetails] = useState(false);
+  const [activeSeasonNumber, setActiveSeasonNumber] = useState(1);
+  const [seasonEpisodes, setSeasonEpisodes] = useState([]);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+
+  const handleOpenSeriesEpisodes = async (item) => {
+    setSelectedSeriesForEpisodes(item);
+    setSeriesTvDetails(null);
+    setSeasonEpisodes([]);
+    setActiveSeasonNumber(1);
+    setLoadingTvDetails(true);
+
+    const tmdbId = item.tmdbId || 
+      (item.id && item.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
+      (item.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
+      (item.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
+
+    if (!tmdbId) {
+      setLoadingTvDetails(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/tv-details?tmdbId=${tmdbId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSeriesTvDetails(data);
+        const firstSeason = data.seasons?.[0]?.seasonNumber || 1;
+        setActiveSeasonNumber(firstSeason);
+        loadSeasonEpisodes(tmdbId, firstSeason, data.seasons?.[0]?.episodeCount);
+      }
+    } catch (e) {
+      console.warn('[TV Details Load Error]', e);
+    } finally {
+      setLoadingTvDetails(false);
+    }
+  };
+
+  const loadSeasonEpisodes = async (tmdbId, seasonNum, episodeCount) => {
+    setLoadingEpisodes(true);
+    try {
+      const countParam = episodeCount ? `&episodeCount=${episodeCount}` : '';
+      const res = await fetch(`/api/tv-season?tmdbId=${tmdbId}&season=${seasonNum}${countParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSeasonEpisodes(data.episodes || []);
+      }
+    } catch (e) {
+      console.warn('[TV Season Load Error]', e);
+    } finally {
+      setLoadingEpisodes(false);
+    }
+  };
+
+  const handleSelectSeason = (seasonNum, episodeCount) => {
+    setActiveSeasonNumber(seasonNum);
+    const tmdbId = selectedSeriesForEpisodes?.tmdbId ||
+      (selectedSeriesForEpisodes?.id && selectedSeriesForEpisodes.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]);
+    if (tmdbId) {
+      loadSeasonEpisodes(tmdbId, seasonNum, episodeCount);
+    }
+  };
+
+  const handlePlayEpisode = (ep) => {
+    if (!selectedSeriesForEpisodes) return;
+    handleSelectMedia(selectedSeriesForEpisodes, activeSeasonNumber, ep.episodeNumber, ep.name);
+    setSelectedSeriesForEpisodes(null);
+  };
 
   const categories = [
     { id: 'all', label: '🔥 All (7REELS & 1Fmovies)' },
@@ -80,7 +153,7 @@ export default function SearchEngineTab({
   }, [query, category, activeSubTab]);
 
   // Handle playing selected movie or platform in room
-  const handleSelectMedia = async (mediaItem) => {
+  const handleSelectMedia = async (mediaItem, selectedSeason = 1, selectedEpisode = 1, episodeTitle = '') => {
     if (!canControl) {
       alert('Only the Virtual Remote holder has permission to change the video. Request or grab the remote to choose movies!');
       return;
@@ -95,10 +168,24 @@ export default function SearchEngineTab({
       (mediaItem.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
       (mediaItem.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
 
+    const isTv = Boolean(
+      mediaItem.isTv || 
+      mediaItem.platform === 'tv' || 
+      mediaItem.genre?.includes('Series') || 
+      mediaItem.duration === 'Series' || 
+      mediaItem.url?.includes('type=series') || 
+      mediaItem.backupUrl?.includes('tmdb-tv') || 
+      mediaItem.url?.includes('/tv/') || 
+      mediaItem.backupUrl?.includes('/tv/') ||
+      mediaItem.season
+    );
+
+    const sNum = isTv ? (Number(selectedSeason) || 1) : null;
+    const eNum = isTv ? (Number(selectedEpisode) || 1) : null;
+
     if (tmdbId && mediaItem.type !== 'platform') {
       try {
-        const isTv = mediaItem.platform === 'tv' || mediaItem.genre?.includes('Series') || mediaItem.url?.includes('type=series') || mediaItem.backupUrl?.includes('tmdb-tv') || mediaItem.url?.includes('/tv/') || mediaItem.backupUrl?.includes('/tv/');
-        const seriesQuery = isTv ? '&type=series&season=1&episode=1' : '';
+        const seriesQuery = isTv ? `&type=series&season=${sNum}&episode=${eNum}` : '';
         const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`);
         if (res.ok) {
           const data = await res.json();
@@ -116,7 +203,7 @@ export default function SearchEngineTab({
     socket.emit('media_change', {
       roomId: room.id,
       media: {
-        id: finalItem.id || `media-${Date.now()}`,
+        id: isTv ? `media-${tmdbId}-s${sNum}e${eNum}-${Date.now()}` : (finalItem.id || `media-${Date.now()}`),
         tmdbId: tmdbId || null,
         title: finalItem.title,
         url: finalItem.url,
@@ -127,6 +214,10 @@ export default function SearchEngineTab({
         color: finalItem.color || null,
         year: finalItem.year || null,
         genre: finalItem.genre || null,
+        isTv,
+        season: sNum,
+        episode: eNum,
+        episodeTitle: isTv ? (episodeTitle || `Episode ${eNum}`) : null,
         source: finalItem.source || (finalItem.platform === '7reels' ? '7REELS' : finalItem.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream'),
         sourceDomain: finalItem.sourceDomain || (finalItem.platform === '7reels' ? '7reels.cc' : finalItem.platform === '1fmovies' ? '1fmovies.live' : null),
         originalQuality: finalItem.originalQuality || (finalItem.source === '7REELS' ? '1080p' : finalItem.source === '1Fmovies' ? '1080p' : 'Auto'),
@@ -654,6 +745,12 @@ export default function SearchEngineTab({
                             <h4 className="text-sm font-bold text-white truncate group-hover:text-indigo-300 transition-colors">
                               {movie.title}
                             </h4>
+                            {/* Series badge if TV series */}
+                            {(movie.isTv || movie.genre?.includes('Series') || movie.duration === 'Series' || movie.platform === 'tv') && (
+                              <span className="px-1.5 py-0.5 rounded text-[8px] font-extrabold bg-purple-500/25 text-purple-300 border border-purple-500/40 flex-shrink-0 uppercase tracking-wide">
+                                Series
+                              </span>
+                            )}
                             {/* Source Badge from where movie is fetched */}
                             {movie.source === '7REELS' || movie.platform === '7reels' ? (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex-shrink-0 tracking-wider">
@@ -688,10 +785,48 @@ export default function SearchEngineTab({
 
                       <div className="mt-2 flex items-center justify-between">
                         {isCurrent ? (
-                          <span className="text-[11px] font-semibold text-emerald-400 flex items-center space-x-1">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            <span>Now Playing</span>
-                          </span>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[11px] font-semibold text-emerald-400 flex items-center space-x-1">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              <span>
+                                Now Playing {movie.isTv && room?.media?.season && room?.media?.episode ? `(S${room.media.season}:E${room.media.episode})` : ''}
+                              </span>
+                            </span>
+                            {(movie.isTv || movie.genre?.includes('Series') || movie.duration === 'Series') && (
+                              <button
+                                onClick={() => handleOpenSeriesEpisodes(movie)}
+                                className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/50 cursor-pointer transition flex items-center space-x-1"
+                                title="Browse Seasons & Episodes"
+                              >
+                                <List className="w-3 h-3" />
+                                <span>Episodes</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : (movie.isTv || movie.genre?.includes('Series') || movie.duration === 'Series' || movie.platform === 'tv') ? (
+                          <div className="flex items-center space-x-1.5">
+                            <button
+                              onClick={() => handleOpenSeriesEpisodes(movie)}
+                              className="flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow transition cursor-pointer active:scale-95"
+                              title="Select Season & Episode"
+                            >
+                              <List className="w-3.5 h-3.5" />
+                              <span>Select Episode</span>
+                            </button>
+                            <button
+                              onClick={() => handleSelectMedia(movie, 1, 1, 'Episode 1')}
+                              disabled={!canControl}
+                              className={`p-1 px-1.5 rounded-lg text-xs font-semibold transition cursor-pointer border flex items-center space-x-0.5 ${
+                                canControl
+                                  ? 'bg-slate-700/80 hover:bg-slate-600 text-slate-200 border-white/10 active:scale-95'
+                                  : 'bg-slate-800 text-slate-500 border-white/5 cursor-not-allowed'
+                              }`}
+                              title="Quick Play S1:E1"
+                            >
+                              <Play className="w-2.5 h-2.5 fill-current" />
+                              <span className="text-[10px]">S1:E1</span>
+                            </button>
+                          </div>
                         ) : (
                           <button
                             onClick={() => handleSelectMedia(movie)}
@@ -785,6 +920,185 @@ export default function SearchEngineTab({
                 <span>Load & Mirror in Room</span>
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* SERIES SEASONS & EPISODES SELECTION MODAL / DRAWER             */}
+      {/* ============================================================== */}
+      {selectedSeriesForEpisodes && (
+        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          {/* Header */}
+          <div className="p-3 sm:p-4 bg-slate-900 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center space-x-3 min-w-0">
+              <button
+                onClick={() => setSelectedSeriesForEpisodes(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer flex-shrink-0"
+                title="Back to search"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-bold text-white text-base truncate">
+                    {selectedSeriesForEpisodes.title}
+                  </h3>
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold tracking-wider border ${
+                    selectedSeriesForEpisodes.source === '7REELS' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                    selectedSeriesForEpisodes.source === '1Fmovies' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                    'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                  }`}>
+                    {selectedSeriesForEpisodes.source || '7REELS'}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2 text-xs text-slate-400 mt-0.5">
+                  <span>{seriesTvDetails?.numberOfSeasons ? `${seriesTvDetails.numberOfSeasons} Seasons` : 'TV Series'}</span>
+                  <span>•</span>
+                  <span>{selectedSeriesForEpisodes.year}</span>
+                  {selectedSeriesForEpisodes.rating && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-400 font-mono">★ {selectedSeriesForEpisodes.rating}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedSeriesForEpisodes(null)}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Season Selector Tabs */}
+          <div className="px-3 pt-3 pb-2 bg-slate-900/60 border-b border-white/5">
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+              <span className="flex items-center space-x-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Seasons:</span>
+              </span>
+              <span className="text-indigo-400 font-mono text-[10px]">Select season below</span>
+            </div>
+            <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
+              {(seriesTvDetails?.seasons || [{ seasonNumber: 1, name: 'Season 1', episodeCount: seasonEpisodes.length }]).map((s) => {
+                const isSelected = activeSeasonNumber === s.seasonNumber;
+                return (
+                  <button
+                    key={s.seasonNumber}
+                    onClick={() => handleSelectSeason(s.seasonNumber, s.episodeCount)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer border flex items-center space-x-1.5 ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/30'
+                        : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <span>{s.name || `Season ${s.seasonNumber}`}</span>
+                    {s.episodeCount > 0 && (
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                        isSelected ? 'bg-indigo-950/60 text-indigo-200' : 'bg-slate-900 text-slate-400'
+                      }`}>
+                        {s.episodeCount} eps
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Episode List */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {loadingEpisodes || loadingTvDetails ? (
+              <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+                <span className="text-xs text-slate-400 font-medium">Fetching episodes for Season {activeSeasonNumber}...</span>
+              </div>
+            ) : seasonEpisodes.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                No episodes found for this season.
+              </div>
+            ) : (
+              seasonEpisodes.map((ep) => {
+                const isCurrentlyPlayingThisEp = 
+                  room?.media?.tmdbId == (selectedSeriesForEpisodes.tmdbId || selectedSeriesForEpisodes.id?.match(/\d+/)?.[0]) &&
+                  Number(room?.media?.season) === Number(activeSeasonNumber) &&
+                  Number(room?.media?.episode) === Number(ep.episodeNumber);
+
+                return (
+                  <div
+                    key={ep.episodeNumber}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                      isCurrentlyPlayingThisEp
+                        ? 'bg-indigo-950/40 border-indigo-500/60 shadow-md ring-1 ring-indigo-500/30'
+                        : 'bg-slate-800/40 hover:bg-slate-800/80 border-white/5 hover:border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      {ep.still ? (
+                        <div className="w-16 h-11 sm:w-20 sm:h-13 rounded-lg overflow-hidden bg-slate-900 flex-shrink-0 relative">
+                          <img
+                            src={ep.still}
+                            alt={ep.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                          <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-[9px] font-mono px-1 rounded text-white">
+                            E{ep.episodeNumber}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0 text-indigo-300 font-bold text-xs">
+                          E{ep.episodeNumber}
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-xs font-bold text-white truncate">
+                            {ep.episodeNumber}. {ep.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
+                          {ep.runtime && <span>{ep.runtime}</span>}
+                          {ep.airDate && <span>• {ep.airDate}</span>}
+                        </div>
+                        {ep.overview && (
+                          <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">
+                            {ep.overview}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex-shrink-0">
+                      {isCurrentlyPlayingThisEp ? (
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center space-x-1">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          <span>Playing</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handlePlayEpisode(ep)}
+                          disabled={!canControl}
+                          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow transition cursor-pointer ${
+                            canControl
+                              ? 'bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95 shadow-indigo-600/30'
+                              : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Play</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

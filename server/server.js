@@ -75,7 +75,7 @@ app.all('/assets/*', async (req, res) => {
 
 // Dynamic API forwarder for embedded web apps like 7reels when they call relative /api/*
 app.use('/api', async (req, res, next) => {
-  const knownPrefixes = ['/health', '/search', '/resolve-stream', '/rooms', '/stream-proxy'];
+  const knownPrefixes = ['/health', '/search', '/resolve-stream', '/rooms', '/stream-proxy', '/tv-details', '/tv-season'];
   if (knownPrefixes.some(p => req.path.startsWith(p))) {
     return next();
   }
@@ -320,7 +320,114 @@ app.all('/api/stream-proxy', async (req, res) => {
   }
 });
 
-// Stream resolver endpoint: extracts direct master.m3u8 from TMDB ID
+// TV Details: Get all seasons and series metadata for TV Shows
+app.get('/api/tv-details', async (req, res) => {
+  const tmdbId = req.query.tmdbId;
+  if (!tmdbId) return res.status(400).json({ error: 'tmdbId required' });
+
+  try {
+    const r = await fetch(`https://gove.co.in/cinemax/tv/${tmdbId}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const validSeasons = (data.seasons || [])
+        .filter(s => s.season_number > 0)
+        .map(s => ({
+          seasonNumber: s.season_number,
+          name: s.name || `Season ${s.season_number}`,
+          episodeCount: s.episode_count || 0,
+          airDate: s.air_date || '',
+          overview: s.overview || '',
+          poster: s.poster_path ? `https://image.tmdb.org/t/p/w342${s.poster_path}` : null
+        }));
+
+      return res.json({
+        success: true,
+        id: data.id,
+        title: data.name || data.title,
+        overview: data.overview,
+        numberOfSeasons: data.number_of_seasons || validSeasons.length || 1,
+        numberOfEpisodes: data.number_of_episodes || 0,
+        backdrop: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null,
+        poster: data.poster_path ? `https://image.tmdb.org/t/p/w342${data.poster_path}` : null,
+        seasons: validSeasons.length > 0 ? validSeasons : [{
+          seasonNumber: 1,
+          name: 'Season 1',
+          episodeCount: data.number_of_episodes || 10,
+          airDate: '',
+          overview: '',
+          poster: null
+        }]
+      });
+    }
+  } catch (err) {
+    console.warn('[TV Details Error]', err.message);
+  }
+
+  // Fallback
+  return res.json({
+    success: true,
+    id: tmdbId,
+    title: 'Series',
+    numberOfSeasons: 1,
+    numberOfEpisodes: 10,
+    seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 10, poster: null }]
+  });
+});
+
+// TV Season: Get individual episodes for a specific Season of a TV Show
+app.get('/api/tv-season', async (req, res) => {
+  const tmdbId = req.query.tmdbId;
+  const season = req.query.season || 1;
+  if (!tmdbId) return res.status(400).json({ error: 'tmdbId required' });
+
+  try {
+    const r = await fetch(`https://gove.co.in/cinemax/tv/${tmdbId}/season/${season}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const episodes = (data.episodes || []).map(ep => ({
+        episodeNumber: ep.episode_number,
+        name: ep.name || `Episode ${ep.episode_number}`,
+        overview: ep.overview || '',
+        runtime: ep.runtime ? `${ep.runtime}m` : null,
+        airDate: ep.air_date || '',
+        still: ep.still_path ? `https://image.tmdb.org/t/p/w342${ep.still_path}` : null
+      }));
+
+      return res.json({
+        success: true,
+        seasonNumber: Number(season),
+        name: data.name || `Season ${season}`,
+        episodes
+      });
+    }
+  } catch (err) {
+    console.warn('[TV Season Error]', err.message);
+  }
+
+  // Fallback: synthesize episodes 1..10 or requested count
+  const count = Number(req.query.episodeCount) || 10;
+  const fallbackEpisodes = Array.from({ length: count }, (_, i) => ({
+    episodeNumber: i + 1,
+    name: `Episode ${i + 1}`,
+    overview: `Season ${season} Episode ${i + 1}`,
+    runtime: '45m',
+    airDate: '',
+    still: null
+  }));
+
+  return res.json({
+    success: true,
+    seasonNumber: Number(season),
+    name: `Season ${season}`,
+    episodes: fallbackEpisodes
+  });
+});
+
+// Stream resolver endpoint: extracts direct master.m3u8 from TMDB ID & Season/Episode
 app.get('/api/resolve-stream', async (req, res) => {
   const tmdbId = req.query.tmdbId;
   if (!tmdbId) {
@@ -328,8 +435,8 @@ app.get('/api/resolve-stream', async (req, res) => {
   }
 
   const isTv = req.query.type === 'series' || req.query.isTv === 'true';
-  const season = req.query.season || 1;
-  const episode = req.query.episode || 1;
+  const season = Number(req.query.season) || 1;
+  const episode = Number(req.query.episode) || 1;
 
   const targetUrl = isTv
     ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=${season}&episode=${episode}`
@@ -345,7 +452,27 @@ app.get('/api/resolve-stream', async (req, res) => {
 
     if (streamRes.ok) {
       const html = await streamRes.text();
-      const match = html.match(/https:\/\/[^"'<>\s]+master\.m3u8[^"'<>\s]*/);
+      let match = null;
+
+      if (isTv) {
+        // Target exact season & episode (e.g. /s01/e02/master.m3u8)
+        const sStr = String(season).padStart(2, '0');
+        const eStr = String(episode).padStart(2, '0');
+        const targetedRegex = new RegExp(`https:\/\/[^"'<>\\s]+s${sStr}\/e${eStr}\/master\\.m3u8[^"'<>\\s]*`);
+        match = html.match(targetedRegex);
+        if (!match) {
+          // Alternative regex for json playback in Next.js script tags
+          const epJsonMatch = html.match(new RegExp(`"episode_number":\\s*${episode}[^}]*"playback":\\s*\\{[^}]*"hls":\\s*"([^"]+)"`));
+          if (epJsonMatch) {
+            match = [epJsonMatch[1]];
+          }
+        }
+      }
+
+      if (!match) {
+        match = html.match(/https:\/\/[^"'<>\s]+master\.m3u8[^"'<>\s]*/);
+      }
+
       if (match) {
         let masterUrl = match[0]
           .replace(/\\u0026/g, '&')
@@ -359,10 +486,12 @@ app.get('/api/resolve-stream', async (req, res) => {
           ? subMatch[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\+$/, '').replace(/"$/, '') 
           : null;
 
-        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}) to direct HLS: ${masterUrl}`);
+        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}, S${season}:E${episode}) to direct HLS: ${masterUrl}`);
         return res.json({
           success: true,
           type: 'hls',
+          season,
+          episode,
           streamUrl: masterUrl,
           subtitleUrl: subUrl
         });
@@ -494,6 +623,10 @@ app.get('/api/search', async (req, res) => {
                   : `https://7reels.cc/movie/${tmdbId}/watch`,
                 type: "7reels",
                 platform: '7reels',
+                isTv: isTv,
+                mediaType: isTv ? 'tv' : 'movie',
+                season: isTv ? 1 : null,
+                episode: isTv ? 1 : null,
                 source: '7REELS',
                 sourceBadge: '7REELS',
                 sourceDomain: '7reels.cc',
@@ -519,6 +652,10 @@ app.get('/api/search', async (req, res) => {
                 backupUrl: `https://1fmovies.live/`,
                 type: "1fmovies",
                 platform: '1fmovies',
+                isTv: isTv,
+                mediaType: isTv ? 'tv' : 'movie',
+                season: isTv ? 1 : null,
+                episode: isTv ? 1 : null,
                 source: '1Fmovies',
                 sourceBadge: '1Fmovies',
                 sourceDomain: '1fmovies.live',
@@ -983,6 +1120,17 @@ io.on('connection', (socket) => {
     }
 
     const member = room.members.get(socket.id);
+    const isTv = Boolean(
+      media.isTv || 
+      media.platform === 'tv' || 
+      media.genre?.includes('Series') || 
+      media.duration === 'Series' || 
+      media.url?.includes('type=series') || 
+      media.season
+    );
+    const season = isTv ? (Number(media.season) || 1) : null;
+    const episode = isTv ? (Number(media.episode) || 1) : null;
+
     room.media = {
       id: media.id || `custom-${Date.now()}`,
       tmdbId: media.tmdbId || null,
@@ -997,11 +1145,16 @@ io.on('connection', (socket) => {
       lastUpdated: Date.now(),
       source: media.source || null,
       platform: media.platform || null,
+      isTv,
+      season,
+      episode,
+      episodeTitle: media.episodeTitle || null,
+      numberOfSeasons: media.numberOfSeasons || null,
       originalQuality: media.originalQuality || '1080p',
       availableQualities: media.availableQualities || null
     };
 
-    console.log(`[Media Changed] in ${roomId} to "${media.title}" by ${member?.name}`);
+    console.log(`[Media Changed] in ${roomId} to "${media.title}" (TV: ${isTv}, S${season}:E${episode}) by ${member?.name}`);
 
     // If media is a TMDB movie/series and not yet direct HLS, attempt server-side resolution
     const rawTmdbId = media.tmdbId || 
@@ -1011,16 +1164,23 @@ io.on('connection', (socket) => {
       (media.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
 
     if (rawTmdbId && room.media.type !== 'hls' && media.type !== 'platform') {
-      const isTv = media.platform === 'tv' || media.genre?.includes('Series') || media.url?.includes('type=series') || media.backupUrl?.includes('tmdb-tv') || media.url?.includes('/tv/') || media.backupUrl?.includes('/tv/');
-      const targetUrl = isTv
-        ? `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}&type=series&season=1&episode=1`
-        : `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}`;
+      const seriesQuery = isTv ? `&type=series&season=${season || 1}&episode=${episode || 1}` : '';
+      const targetUrl = `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}${seriesQuery}`;
 
       fetch(targetUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
         signal: AbortSignal.timeout(3500)
       }).then(r => r.text()).then(html => {
-        const match = html.match(/https:\/\/[^"'<>\s]+master\.m3u8[^"'<>\s]*/);
+        let match = null;
+        if (isTv) {
+          const sStr = String(season || 1).padStart(2, '0');
+          const eStr = String(episode || 1).padStart(2, '0');
+          const targetedRegex = new RegExp(`https:\/\/[^"'<>\\s]+s${sStr}\/e${eStr}\/master\\.m3u8[^"'<>\\s]*`);
+          match = html.match(targetedRegex);
+        }
+        if (!match) {
+          match = html.match(/https:\/\/[^"'<>\s]+master\.m3u8[^"'<>\s]*/);
+        }
         if (match) {
           let masterUrl = match[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\+$/, '').replace(/"$/, '');
           console.log(`[Server Auto-Resolve] Converted "${room.media.title}" to direct HLS stream: ${masterUrl}`);
@@ -1041,9 +1201,10 @@ io.on('connection', (socket) => {
       triggeredBy: member?.name || 'Host'
     });
 
+    const epDisplay = isTv && season && episode ? ` (S${season}:E${episode}${media.episodeTitle ? ` - ${media.episodeTitle}` : ''})` : '';
     io.to(roomId).emit('system_message', {
       id: `sys-${Date.now()}`,
-      text: `${member?.name || 'Host'} started playing "${media.title}".`,
+      text: `${member?.name || 'Host'} started playing "${media.title}"${epDisplay}.`,
       timestamp: Date.now(),
       type: 'media_change'
     });
