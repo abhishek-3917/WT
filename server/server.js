@@ -617,8 +617,8 @@ app.get('/api/search', async (req, res) => {
                 thumbnail: thumb,
                 backdrop: back,
                 url: isTv 
-                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=1080p` 
-                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=1080p`,
+                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=2160p` 
+                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
                 backupUrl: isTv 
                   ? `https://7reels.cc/tv/${tmdbId}/watch?s=1&e=1` 
                   : `https://7reels.cc/movie/${tmdbId}/watch`,
@@ -632,8 +632,8 @@ app.get('/api/search', async (req, res) => {
                 sourceBadge: '7REELS',
                 sourceDomain: '7reels.cc',
                 sourceColor: '#e11d48',
-                originalQuality: '1080p',
-                availableQualities: ['1080p', '720p', '480p', 'auto']
+                originalQuality: '2160p',
+                availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
               },
               // 2. Result from 1Fmovies (Original 1080p FHD Stream)
               {
@@ -713,7 +713,7 @@ app.get('/api/search', async (req, res) => {
               description: desc,
               thumbnail: thumb,
               backdrop: back,
-              url: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085&quality=1080p`,
+              url: `https://vidy.st/movie/${item.id}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
               backupUrl: `https://7reels.cc/movie/${item.id}/watch`,
               type: "7reels",
               platform: '7reels',
@@ -721,8 +721,8 @@ app.get('/api/search', async (req, res) => {
               sourceBadge: '7REELS',
               sourceDomain: '7reels.cc',
               sourceColor: '#e11d48',
-              originalQuality: '1080p',
-              availableQualities: ['1080p', '720p', '480p', 'auto']
+              originalQuality: '2160p',
+              availableQualities: ['2160p', '1080p', '720p', '480p', 'auto']
             },
             // 1Fmovies Result (Original 1080p FHD Stream)
             {
@@ -1271,8 +1271,8 @@ io.on('connection', (socket) => {
       episode,
       episodeTitle: media.episodeTitle || null,
       numberOfSeasons: media.numberOfSeasons || null,
-      originalQuality: media.originalQuality || '1080p',
-      availableQualities: media.availableQualities || null
+      originalQuality: media.originalQuality || (media.source === '7REELS' ? '2160p' : '1080p'),
+      availableQualities: media.availableQualities || (media.source === '7REELS' ? ['2160p', '1080p', '720p', '480p', 'auto'] : ['1080p', '720p', '480p', 'auto'])
     };
 
     console.log(`[Media Changed] in ${roomId} to "${media.title}" (TV: ${isTv}, S${season}:E${episode}) by ${member?.name}`);
