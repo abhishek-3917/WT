@@ -4,7 +4,7 @@ import {
   Search, Film, Globe, Play, CheckCircle, 
   Sparkles, ExternalLink, SlidersHorizontal, AlertCircle,
   Tv, Monitor, Radio, Compass, RefreshCw, X, List, ChevronRight,
-  Layers, Loader2, ArrowLeft, Clock, Trash2
+  Layers, Loader2, ArrowLeft, Clock, Trash2, Languages
 } from 'lucide-react';
 
 const YoutubeIcon = ({ className = "w-3 h-3" }) => (
@@ -787,7 +787,7 @@ export default function SearchEngineTab({
                             ★ {movie.rating}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1 flex items-center space-x-1">
+                        <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1 flex items-center space-x-1 flex-wrap">
                           <span>{movie.year} • {movie.genre}</span>
                           <span className="text-slate-500">•</span>
                           <span className="text-slate-300 font-medium">
@@ -796,6 +796,11 @@ export default function SearchEngineTab({
                               movie.source === '1Fmovies' || movie.platform === '1fmovies' ? 'text-emerald-400' :
                               'text-indigo-300'
                             }>{movie.source || (movie.platform === '7reels' ? '7REELS' : movie.platform === '1fmovies' ? '1Fmovies' : 'Direct Stream')}</strong>
+                          </span>
+                          <span className="text-slate-500">•</span>
+                          <span className="text-indigo-300 font-medium flex items-center space-x-1 text-[10px] bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/20">
+                            <Languages className="w-2.5 h-2.5 text-indigo-400" />
+                            <span>Multi-Audio (Hindi • Eng)</span>
                           </span>
                         </p>
                       </div>
@@ -1141,6 +1146,16 @@ export default function SearchEngineTab({
                   </button>
                 );
               })}
+            </div>
+
+            <div className="flex items-center space-x-2 pt-2 text-[10px]">
+              <span className="text-slate-400 font-semibold flex items-center space-x-1">
+                <Languages className="w-3 h-3 text-indigo-400" />
+                <span>Audio Languages:</span>
+              </span>
+              <span className="font-bold text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30">
+                Hindi (हिन्दी) • English • Original Multi-Audio
+              </span>
             </div>
           </div>
 

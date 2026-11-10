@@ -11,6 +11,79 @@ import {
   List, SkipForward, Layers, Search
 } from 'lucide-react';
 
+export const formatLanguageName = (track) => {
+  if (!track) return 'Default Audio';
+  const rawLang = (track.lang || '').toLowerCase().trim();
+  const rawName = (track.name || '').trim();
+
+  const langMap = {
+    'hin': 'Hindi (हिन्दी)',
+    'hi': 'Hindi (हिन्दी)',
+    'hindi': 'Hindi (हिन्दी)',
+    'eng': 'English',
+    'en': 'English',
+    'english': 'English',
+    'spa': 'Spanish (Español)',
+    'es': 'Spanish (Español)',
+    'spanish': 'Spanish (Español)',
+    'fre': 'French (Français)',
+    'fra': 'French (Français)',
+    'fr': 'French (Français)',
+    'french': 'French (Français)',
+    'ger': 'German (Deutsch)',
+    'deu': 'German (Deutsch)',
+    'de': 'German (Deutsch)',
+    'german': 'German (Deutsch)',
+    'ita': 'Italian (Italiano)',
+    'it': 'Italian (Italiano)',
+    'italian': 'Italian (Italiano)',
+    'jpn': 'Japanese (日本語)',
+    'ja': 'Japanese (日本語)',
+    'japanese': 'Japanese (日本語)',
+    'kor': 'Korean (한국어)',
+    'ko': 'Korean (한국어)',
+    'korean': 'Korean (한국어)',
+    'zho': 'Chinese (中文)',
+    'chi': 'Chinese (中文)',
+    'zh': 'Chinese (中文)',
+    'chinese': 'Chinese (中文)',
+    'rus': 'Russian (Русский)',
+    'ru': 'Russian (Русский)',
+    'russian': 'Russian (Русский)',
+    'tam': 'Tamil (தமிழ்)',
+    'ta': 'Tamil (தமிழ்)',
+    'tamil': 'Tamil (தமிழ்)',
+    'tel': 'Telugu (తెలుగు)',
+    'te': 'Telugu (తెలుగు)',
+    'telugu': 'Telugu (తెలుగు)',
+    'mal': 'Malayalam (മലയാളം)',
+    'ml': 'Malayalam (മലയാളം)',
+    'kan': 'Kannada (ಕನ್ನಡ)',
+    'kn': 'Kannada (ಕನ್ನಡ)',
+    'ben': 'Bengali (বাংলা)',
+    'bn': 'Bengali (বাংলা)',
+    'por': 'Portuguese (Português)',
+    'pt': 'Portuguese (Português)',
+    'portuguese': 'Portuguese (Português)',
+    'ara': 'Arabic (العربية)',
+    'ar': 'Arabic (العربية)',
+    'arabic': 'Arabic (العربية)',
+    'tur': 'Turkish (Türkçe)',
+    'tr': 'Turkish (Türkçe)',
+    'turkish': 'Turkish (Türkçe)'
+  };
+
+  if (rawLang && langMap[rawLang]) return langMap[rawLang];
+  if (rawName && langMap[rawName.toLowerCase()]) return langMap[rawName.toLowerCase()];
+  if (rawName && !rawName.toLowerCase().startsWith('audio_') && !rawName.toLowerCase().startsWith('track_')) {
+    return rawName;
+  }
+  if (rawLang && rawLang !== 'und') {
+    return rawLang.toUpperCase();
+  }
+  return `Audio Track ${track.id !== undefined ? Number(track.id) + 1 : ''}`;
+};
+
 export default function SyncedPlayer({ 
   room, 
   currentUser, 
@@ -141,6 +214,7 @@ export default function SyncedPlayer({
   const [currentQualityLevel, setCurrentQualityLevel] = useState(-1);
   const [selectedQuality, setSelectedQuality] = useState('2160p');
   const [qualityNotice, setQualityNotice] = useState(null);
+  const [audioNotice, setAudioNotice] = useState(null);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   // In-Player TV Series Season & Episode Selector Drawer
@@ -526,6 +600,9 @@ export default function SyncedPlayer({
           if (data.success && data.streamUrl) {
             console.log(`[Auto-Stream Resolve] Successfully converted "${media?.title}" (S${season}:E${episode}) to direct native HLS:`, data.streamUrl);
             setResolvedHlsUrl(data.streamUrl);
+            if (data.audioTracks && data.audioTracks.length > 0) {
+              setAudioTracks(data.audioTracks);
+            }
           } else {
             console.log(`[Auto-Stream Resolve] Direct HLS not available for "${media?.title}", falling back to embed`);
             setResolvedHlsUrl(null);
@@ -559,6 +636,16 @@ export default function SyncedPlayer({
       hlsRef.current.audioTrack = trackId;
       setCurrentAudioTrack(trackId);
       setShowAudioMenu(false);
+      const track = (audioTracks || []).find(t => t.id === trackId) || audioTracks?.[trackId];
+      const langLabel = formatLanguageName(track);
+      setAudioNotice(`Audio: ${langLabel}`);
+      setTimeout(() => setAudioNotice(null), 3500);
+      socket.emit('media_audio_track', {
+        roomId: room.id,
+        trackId,
+        trackLang: track?.lang || null,
+        trackName: langLabel
+      });
     }
   };
 
@@ -1053,11 +1140,13 @@ export default function SyncedPlayer({
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        maxBufferSize: 120 * 1000 * 1000, // 120MB buffer for high-bitrate 4K Ultra HD
-        capLevelToPlayerSize: false // Do not limit 4K streams to player viewport size
+        backBufferLength: 60,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 60 * 1000 * 1000,
+        capLevelToPlayerSize: false,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5
       });
 
       hlsRef.current = hlsInstance;
@@ -1066,9 +1155,9 @@ export default function SyncedPlayer({
 
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
         setIsLoadingMedia(false);
-        if (hlsInstance.audioTracks && hlsInstance.audioTracks.length > 1) {
+        if (hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
           setAudioTracks(hlsInstance.audioTracks);
-          setCurrentAudioTrack(hlsInstance.audioTrack);
+          setCurrentAudioTrack(hlsInstance.audioTrack >= 0 ? hlsInstance.audioTrack : 0);
         }
         if (hlsInstance.levels && hlsInstance.levels.length > 0) {
           setQualityLevels(hlsInstance.levels);
@@ -1088,19 +1177,27 @@ export default function SyncedPlayer({
             }
           });
 
-          // Fetch and lock to highest quality video available
-          hlsInstance.currentLevel = highestLevelIdx;
-          hlsInstance.loadLevel = highestLevelIdx;
+          // Instruct HLS to fetch highest quality segments without breaking playback pipeline
+          hlsInstance.startLevel = highestLevelIdx;
           setCurrentQualityLevel(highestLevelIdx);
           const topQualityLabel = maxHeight ? `${maxHeight}p` : 'Highest';
           setSelectedQuality(topQualityLabel);
-          console.log(`[HLS] Automatically fetched and locked to HIGHEST available quality: ${topQualityLabel} (${(maxBitrate / 1000000).toFixed(1)} Mbps, level ${highestLevelIdx})`);
+          console.log(`[HLS] Automatically starting at HIGHEST quality: ${topQualityLabel} (${(maxBitrate / 1000000).toFixed(1)} Mbps, level ${highestLevelIdx})`);
         }
         if (media?.currentTime > 0) {
           video.currentTime = media.currentTime;
         }
         if (media?.isPlaying) {
           safePlay();
+        }
+      });
+
+      hlsInstance.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
+        if (data.audioTracks && data.audioTracks.length > 0) {
+          setAudioTracks(data.audioTracks);
+          if (hlsInstance.audioTrack >= 0) {
+            setCurrentAudioTrack(hlsInstance.audioTrack);
+          }
         }
       });
 
@@ -1119,12 +1216,21 @@ export default function SyncedPlayer({
       });
 
       hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+        // Auto-nudge past minor buffer gaps and stalls to prevent infinite buffering
+        if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
+          console.warn('[HLS] Buffer stall detected, auto-nudging video head...', data.details);
+          if (video && !video.paused) {
+            video.currentTime += 0.1;
+          }
+        }
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('[HLS Fatal] Network error, recovering...');
               hlsInstance.startLoad();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('[HLS Fatal] Media error, attempting recovery...');
               hlsInstance.recoverMediaError();
               break;
             default:
@@ -1163,6 +1269,7 @@ export default function SyncedPlayer({
     setMediaError(null);
 
     const onTimeUpdate = () => {
+      setIsLoadingMedia(false);
       setCurrentTime(video.currentTime || 0);
       if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
@@ -1204,8 +1311,15 @@ export default function SyncedPlayer({
       }
     };
 
-    const onWaiting = () => setIsLoadingMedia(true);
+    const onWaiting = () => {
+      if (!video.paused) {
+        setIsLoadingMedia(true);
+      }
+    };
+    const onPlaying = () => setIsLoadingMedia(false);
     const onCanPlay = () => setIsLoadingMedia(false);
+    const onCanPlayThrough = () => setIsLoadingMedia(false);
+    const onLoadedData = () => setIsLoadingMedia(false);
 
     const onError = (e) => {
       console.error('[Video Error]', video.error, e);
@@ -1214,6 +1328,7 @@ export default function SyncedPlayer({
     };
 
     const onPlay = () => {
+      setIsLoadingMedia(false);
       setIsPlaying(true);
       if (isRemoteAction.current) return;
       if (!canControl) {
@@ -1228,6 +1343,7 @@ export default function SyncedPlayer({
     };
 
     const onPause = () => {
+      setIsLoadingMedia(false);
       setIsPlaying(false);
       if (isRemoteAction.current) return;
       if (!canControl) {
@@ -1242,6 +1358,7 @@ export default function SyncedPlayer({
     };
 
     const onSeeked = () => {
+      setIsLoadingMedia(false);
       if (isRemoteAction.current) return;
       if (!canControl) return;
       socket.emit('media_seek', { roomId: room.id, currentTime: video.currentTime || 0 });
@@ -1251,8 +1368,11 @@ export default function SyncedPlayer({
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('durationchange', onDurationChange);
     video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.addEventListener('loadeddata', onLoadedData);
     video.addEventListener('waiting', onWaiting);
+    video.addEventListener('playing', onPlaying);
     video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('canplaythrough', onCanPlayThrough);
     video.addEventListener('error', onError);
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
@@ -1262,8 +1382,11 @@ export default function SyncedPlayer({
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('durationchange', onDurationChange);
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('loadeddata', onLoadedData);
       video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('playing', onPlaying);
       video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('canplaythrough', onCanPlayThrough);
       video.removeEventListener('error', onError);
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
@@ -1394,12 +1517,23 @@ export default function SyncedPlayer({
       }
     };
 
+    const handleRemoteAudioTrack = ({ trackId, trackLang, trackName, changedBy }) => {
+      console.log(`[Remote Audio] Audio changed to ${trackName || trackId} by ${changedBy}`);
+      if (hlsRef.current && trackId !== undefined) {
+        hlsRef.current.audioTrack = trackId;
+        setCurrentAudioTrack(trackId);
+        setAudioNotice(`Audio changed to ${trackName || 'Selected Language'}`);
+        setTimeout(() => setAudioNotice(null), 3000);
+      }
+    };
+
     socket.on('media_play', handleRemotePlay);
     socket.on('media_pause', handleRemotePause);
     socket.on('media_seek', handleRemoteSeek);
     socket.on('sync_state', handleSyncState);
     socket.on('auto_sync_pulse', handleAutoSyncPulse);
     socket.on('media_scroll', handleRemoteScroll);
+    socket.on('media_audio_track_changed', handleRemoteAudioTrack);
 
     return () => {
       socket.off('media_play', handleRemotePlay);
@@ -1408,8 +1542,30 @@ export default function SyncedPlayer({
       socket.off('sync_state', handleSyncState);
       socket.off('auto_sync_pulse', handleAutoSyncPulse);
       socket.off('media_scroll', handleRemoteScroll);
+      socket.off('media_audio_track_changed', handleRemoteAudioTrack);
     };
   }, [media?.type, safePlay, safePause, canControl, isPortalType, isNativeVideo]);
+
+  // Watchdog: auto-clear stuck buffering state after 3 seconds
+  useEffect(() => {
+    if (!isLoadingMedia) return;
+    const timer = setTimeout(() => {
+      const v = videoRef.current;
+      if (v) {
+        if (!v.paused && v.currentTime > 0) {
+          setIsLoadingMedia(false);
+        } else if (!v.paused) {
+          v.currentTime += 0.1;
+          setIsLoadingMedia(false);
+        } else {
+          setIsLoadingMedia(false);
+        }
+      } else {
+        setIsLoadingMedia(false);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [isLoadingMedia]);
 
   // Toggle Play / Pause User Action
   const handleTogglePlay = (e) => {
@@ -1928,11 +2084,38 @@ export default function SyncedPlayer({
         </div>
       )}
 
-      {/* Buffering Spinner */}
+      {/* Audio Language Change Toast Alert */}
+      {audioNotice && (
+        <div className="absolute top-16 z-40 bg-slate-900/95 border border-indigo-500/50 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-top duration-300">
+          <Languages className="w-4 h-4 text-indigo-400" />
+          <span>{audioNotice}</span>
+        </div>
+      )}
+
+      {/* Buffering Spinner with Instant Resume Helper */}
       {isLoadingMedia && (
-        <div className="absolute z-20 flex flex-col items-center justify-center space-y-2 pointer-events-none">
-          <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
-          <span className="text-xs text-slate-300 font-semibold bg-black/60 px-2 py-0.5 rounded-full">Buffering...</span>
+        <div className="absolute z-20 flex flex-col items-center justify-center space-y-2.5 pointer-events-auto">
+          <div className="relative flex items-center justify-center">
+            <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-xs text-slate-300 font-semibold bg-black/75 px-3 py-1 rounded-full border border-white/10 shadow-lg">
+              Buffering stream...
+            </span>
+            <button
+              onClick={() => {
+                setIsLoadingMedia(false);
+                if (videoRef.current) {
+                  videoRef.current.currentTime += 0.05;
+                  safePlay();
+                }
+              }}
+              className="text-[11px] font-bold text-indigo-300 bg-indigo-600/70 hover:bg-indigo-600 px-2.5 py-1 rounded-full border border-indigo-400/30 transition cursor-pointer active:scale-95 shadow"
+              title="Force resume stream playback"
+            >
+              Resume
+            </button>
+          </div>
         </div>
       )}
 
@@ -2366,6 +2549,20 @@ export default function SyncedPlayer({
 
           {/* Auto-Sync Live Badge & Party Cam Action */}
           <div className="flex items-center space-x-2.5">
+            {audioTracks && audioTracks.length > 0 && (
+              <button
+                onClick={() => setShowAudioMenu(prev => !prev)}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 transition cursor-pointer shadow-sm"
+                title="Select Audio Language"
+              >
+                <Languages className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-[11px] font-bold">
+                  {formatLanguageName(audioTracks[currentAudioTrack] || audioTracks[0])}
+                </span>
+                <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+              </button>
+            )}
+
             <button
               onClick={() => setShowFloatingCam(prev => !prev)}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow transition cursor-pointer border ${
@@ -2452,34 +2649,55 @@ export default function SyncedPlayer({
             </div>
 
             <div className="flex items-center space-x-3">
-              {/* Audio Language Switcher (e.g. Hindi, English) */}
-              {audioTracks && audioTracks.length > 1 && (
+              {/* Audio Language Switcher (e.g. Hindi, English, Spanish) */}
+              {audioTracks && audioTracks.length > 0 && (
                 <div className="relative">
                   <button
                     onClick={() => setShowAudioMenu(prev => !prev)}
-                    className="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
                     title="Change Audio Language"
                   >
-                    <Languages className="w-3.5 h-3.5" />
-                    <span>{audioTracks[currentAudioTrack]?.name || audioTracks[currentAudioTrack]?.lang || 'Audio'}</span>
-                    <ChevronDown className="w-3 h-3" />
+                    <Languages className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="text-[11px] font-bold truncate max-w-[100px]">
+                      {formatLanguageName(audioTracks[currentAudioTrack] || audioTracks[0])}
+                    </span>
+                    <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
                   </button>
 
                   {showAudioMenu && (
-                    <div className="absolute bottom-full mb-2 right-0 bg-slate-900 border border-white/10 rounded-xl p-1.5 shadow-2xl z-50 min-w-[130px] space-y-1">
-                      <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Audio Language</div>
-                      {audioTracks.map((track) => (
-                        <button
-                          key={track.id}
-                          onClick={() => handleSelectAudioTrack(track.id)}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
-                            currentAudioTrack === track.id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-white/10'
-                          }`}
-                        >
-                          <span>{track.name || track.lang || `Track ${track.id + 1}`}</span>
-                          {currentAudioTrack === track.id && <Check className="w-3 h-3 text-white" />}
-                        </button>
-                      ))}
+                    <div className="absolute bottom-full mb-2 right-0 bg-slate-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl z-50 min-w-[190px] space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
+                        <span className="flex items-center space-x-1">
+                          <Languages className="w-3 h-3 text-indigo-400" />
+                          <span>Audio Language</span>
+                        </span>
+                        <span className="text-[9px] font-mono text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                          {audioTracks.length} Available
+                        </span>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto space-y-0.5 custom-scrollbar">
+                        {audioTracks.map((track, idx) => {
+                          const isSelected = currentAudioTrack === track.id || (currentAudioTrack === -1 && idx === 0);
+                          const formatted = formatLanguageName(track);
+                          return (
+                            <button
+                              key={track.id !== undefined ? track.id : idx}
+                              onClick={() => handleSelectAudioTrack(track.id !== undefined ? track.id : idx)}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-bold shadow-md shadow-indigo-600/20'
+                                  : 'text-slate-300 hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2 truncate">
+                                <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-indigo-400'}`} />
+                                <span className="truncate">{formatted}</span>
+                              </div>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

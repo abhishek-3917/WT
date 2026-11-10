@@ -487,14 +487,36 @@ app.get('/api/resolve-stream', async (req, res) => {
           ? subMatch[0].replace(/\\u0026/g, '&').replace(/&amp;/g, '&').replace(/\\+$/, '').replace(/"$/, '') 
           : null;
 
-        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}, S${season}:E${episode}) to direct HLS: ${masterUrl}`);
+        // Fetch master.m3u8 header to discover all available Audio Languages
+        let audioTracks = [];
+        try {
+          const m3u8Res = await fetch(masterUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            signal: AbortSignal.timeout(2500)
+          });
+          if (m3u8Res.ok) {
+            const m3u8Text = await m3u8Res.text();
+            const audioLines = m3u8Text.split('\n').filter(l => l.includes('TYPE=AUDIO'));
+            audioTracks = audioLines.map((line, idx) => {
+              const lang = line.match(/LANGUAGE="([^"]+)"/)?.[1] || 'und';
+              const name = line.match(/NAME="([^"]+)"/)?.[1] || `Audio ${idx + 1}`;
+              const isDefault = line.includes('DEFAULT=YES');
+              return { id: idx, lang, name, isDefault };
+            });
+          }
+        } catch (e) {
+          console.warn('[Audio Tracks Parse Error]', e.message);
+        }
+
+        console.log(`[Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}, S${season}:E${episode}) to direct HLS: ${masterUrl} with ${audioTracks.length} audio tracks`);
         return res.json({
           success: true,
           type: 'hls',
           season,
           episode,
           streamUrl: masterUrl,
-          subtitleUrl: subUrl
+          subtitleUrl: subUrl,
+          audioTracks
         });
       }
     }
@@ -1364,6 +1386,22 @@ io.on('connection', (socket) => {
     room.media.currentTime = currentTime;
     room.media.isPlaying = isPlaying;
     room.media.lastUpdated = Date.now();
+  });
+
+  // Audio Language track change
+  socket.on('media_audio_track', ({ roomId, trackId, trackLang, trackName }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.media) return;
+    room.media.selectedAudioTrack = trackId;
+    room.media.selectedAudioLang = trackLang;
+    const member = room.members.get(socket.id);
+    console.log(`[Audio Track Changed] in ${roomId} to track ${trackId} (${trackName || trackLang}) by ${member?.name}`);
+    socket.to(roomId).emit('media_audio_track_changed', {
+      trackId,
+      trackLang,
+      trackName,
+      changedBy: member?.name || 'Remote Controller'
+    });
   });
 
   // WebRTC Mesh Signaling (Peer to Peer Video & Audio)
