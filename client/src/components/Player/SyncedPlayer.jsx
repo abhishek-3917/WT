@@ -1492,7 +1492,11 @@ export default function SyncedPlayer({
     // 5. Automatic Continuous Heartbeat Pulse (Keeps participants automatically aligned without any button clicks)
     const handleAutoSyncPulse = ({ currentTime: pulseTime, isPlaying: pulseIsPlaying, mediaId }) => {
       if (canControl) return; // Controller is the reference clock
-      if (mediaId && media?.id && mediaId !== media?.id) return;
+      if (mediaId && media?.id && mediaId !== media?.id && mediaId !== media?.url && (!media?.title || !mediaId.includes(media.title))) {
+        if (media?.url && !mediaId.includes(media.url) && !media.url.includes(mediaId)) {
+          return;
+        }
+      }
 
       if (isNativeVideo && videoRef.current) {
         const v = videoRef.current;
@@ -1593,13 +1597,24 @@ export default function SyncedPlayer({
   const handleTogglePlay = (e) => {
     if (e) e.stopPropagation();
 
-    if (autoplayBlocked && videoRef.current) {
+    if (videoRef.current && (autoplayBlocked || isMuted)) {
       videoRef.current.muted = false;
       setIsMuted(false);
       setAutoplayBlocked(false);
     }
 
     if (!canControl) {
+      // If room media is playing, or local video is paused, allow participant to unmute, start playback, and sync with host!
+      if (room?.media?.isPlaying || (videoRef.current && videoRef.current.paused)) {
+        if (videoRef.current) {
+          videoRef.current.muted = false;
+          setIsMuted(false);
+          setAutoplayBlocked(false);
+          safePlay(room?.media?.currentTime);
+        }
+        socket.emit('request_sync', { roomId: room.id });
+        return;
+      }
       triggerPermissionNotice();
       return;
     }

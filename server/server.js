@@ -1483,6 +1483,14 @@ io.on('connection', (socket) => {
     room.media.currentTime = currentTime;
     room.media.isPlaying = isPlaying;
     room.media.lastUpdated = Date.now();
+
+    // Broadcast live auto_sync_pulse immediately to all participants in room
+    socket.to(roomId).emit('auto_sync_pulse', {
+      currentTime,
+      isPlaying,
+      mediaId: room.media.id,
+      timestamp: Date.now()
+    });
   });
 
   // Audio Language track change
@@ -1685,12 +1693,15 @@ app.get('*', (req, res) => {
 // Continuous Automatic Background Sync Pulse (every 2.5s)
 setInterval(() => {
   rooms.forEach((room, roomId) => {
-    if (room.media && room.media.isPlaying) {
-      const elapsedSec = (Date.now() - room.media.lastUpdated) / 1000;
-      const currentCalculatedTime = room.media.currentTime + elapsedSec * (room.media.playbackRate || 1);
+    if (room.media) {
+      let currentCalculatedTime = room.media.currentTime || 0;
+      if (room.media.isPlaying) {
+        const elapsedSec = (Date.now() - (room.media.lastUpdated || Date.now())) / 1000;
+        currentCalculatedTime += elapsedSec * (room.media.playbackRate || 1);
+      }
       io.to(roomId).emit('auto_sync_pulse', {
         currentTime: currentCalculatedTime,
-        isPlaying: true,
+        isPlaying: Boolean(room.media.isPlaying),
         mediaId: room.media.id,
         timestamp: Date.now()
       });

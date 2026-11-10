@@ -142,7 +142,7 @@ export default function App() {
     toggleAudio,
     toggleVideo,
     toggleScreenShare
-  } = useWebRTC(room?.id, currentUser);
+  } = useWebRTC(room?.id, currentUser, room?.members);
 
   // Handle room joined from Lobby
   const handleRoomJoined = (roomData, userData) => {
@@ -285,6 +285,20 @@ export default function App() {
       setRoom((prev) => (prev ? { ...prev, members } : prev));
     };
 
+    // User mic/cam toggled
+    const handleMediaStateChanged = ({ socketId, hasAudio, hasVideo }) => {
+      setRoom((prev) => {
+        if (!prev || !prev.members) return prev;
+        const updated = prev.members.map((m) => {
+          if (m.socketId === socketId) {
+            return { ...m, hasAudio, hasVideo };
+          }
+          return m;
+        });
+        return { ...prev, members: updated };
+      });
+    };
+
     socket.on('room_settings_updated', handleSettingsUpdated);
     socket.on('media_changed', handleMediaChanged);
     socket.on('chat_history', handleChatHistory);
@@ -294,6 +308,7 @@ export default function App() {
     socket.on('user_joined', handleUserJoined);
     socket.on('user_left', handleUserLeft);
     socket.on('members_updated', handleMembersUpdated);
+    socket.on('user_media_state_changed', handleMediaStateChanged);
     socket.on('host_changed', handleHostChanged);
     socket.on('remote_transferred', handleRemoteTransferred);
     socket.on('remote_requested', handleRemoteRequested);
@@ -308,6 +323,7 @@ export default function App() {
       socket.off('user_joined', handleUserJoined);
       socket.off('user_left', handleUserLeft);
       socket.off('members_updated', handleMembersUpdated);
+      socket.off('user_media_state_changed', handleMediaStateChanged);
       socket.off('host_changed', handleHostChanged);
       socket.off('remote_transferred', handleRemoteTransferred);
       socket.off('remote_requested', handleRemoteRequested);

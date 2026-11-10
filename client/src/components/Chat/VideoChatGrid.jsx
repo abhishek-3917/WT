@@ -7,29 +7,47 @@ import {
 
 function RemoteVideoTile({ peerSocketId, streamData, volume = 1, isRemoteHolder = false, onPassRemote = null, canPass = false }) {
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && streamData?.stream) {
-      videoRef.current.srcObject = streamData.stream;
-      videoRef.current.volume = volume;
+    if (streamData?.stream) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = streamData.stream;
+        videoRef.current.play().catch((e) => console.log('[Remote Video Autoplay Notice]', e.message));
+      }
+      if (audioRef.current) {
+        audioRef.current.srcObject = streamData.stream;
+        audioRef.current.volume = volume;
+        audioRef.current.play().catch((e) => console.log('[Remote Audio Autoplay Notice]', e.message));
+      }
     }
   }, [streamData?.stream, volume]);
 
-  const hasVideo = streamData?.stream?.getVideoTracks?.().some(t => t.enabled) ?? true;
-  const hasAudio = streamData?.stream?.getAudioTracks?.().some(t => t.enabled) ?? true;
+  const videoTracks = streamData?.stream?.getVideoTracks?.() || [];
+  const hasVideo = videoTracks.some((t) => t.enabled);
+  const audioTracks = streamData?.stream?.getAudioTracks?.() || [];
+  const hasAudio = audioTracks.some((t) => t.enabled);
 
   return (
     <div className={`relative aspect-video bg-slate-950 rounded-xl overflow-hidden border shadow-lg group transition-all duration-300 ${
       hasAudio ? 'ring-2 ring-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.25)] border-emerald-500/40' : 'border-white/10'
     }`}>
-      {hasVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="w-full h-full object-cover"
-        />
-      ) : (
+      {/* Permanent audio element to guarantee remote voice is ALWAYS audible even if camera is off */}
+      <audio
+        ref={audioRef}
+        autoPlay
+        playsInline
+      />
+
+      {/* Video element kept permanently in DOM for zero-latency display, hidden when camera is off */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className={`w-full h-full object-cover ${hasVideo ? 'block' : 'hidden'}`}
+      />
+
+      {!hasVideo && (
         <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-400">
           <div className="w-10 h-10 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center text-base font-bold text-indigo-400">
             {streamData?.user?.name?.charAt(0)?.toUpperCase() || 'P'}
