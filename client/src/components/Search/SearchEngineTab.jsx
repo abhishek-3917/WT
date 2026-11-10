@@ -186,16 +186,47 @@ export default function SearchEngineTab({
     const sNum = isTv ? (Number(selectedSeason) || 1) : null;
     const eNum = isTv ? (Number(selectedEpisode) || 1) : null;
 
-    if (tmdbId && mediaItem.type !== 'platform') {
+    const isFrom7Reels = mediaItem.source === '7REELS' || mediaItem.platform === '7reels' || mediaItem.id?.toString().startsWith('7reels') || mediaItem.url?.includes('7reels') || mediaItem.url?.includes('vidbolt');
+
+    if (isFrom7Reels) {
+      finalItem.source = '7REELS';
+      finalItem.sourceBadge = '7REELS';
+      finalItem.sourceDomain = '7reels.cc';
+      finalItem.sourceColor = '#e11d48';
+      finalItem.type = 'hls';
+      finalItem.platform = '7reels';
+      finalItem.backupUrl = isTv 
+        ? `https://7reels.cc/tv/${tmdbId}/watch?s=${sNum || 1}&e=${eNum || 1}`
+        : `https://7reels.cc/movie/${tmdbId}/watch`;
+      try {
+        const seriesQuery = isTv ? `&type=series&season=${sNum || 1}&episode=${eNum || 1}` : '&type=movie';
+        const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}&source=7REELS${seriesQuery}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.streamUrl) {
+            finalItem.url = data.streamUrl;
+            finalItem.type = 'hls';
+            if (data.audioTracks && data.audioTracks.length > 0) {
+              finalItem.audioTracks = data.audioTracks;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[7REELS Direct Stream Resolve Error]', err);
+      }
+    } else if (tmdbId && mediaItem.type !== 'platform') {
       try {
         const seriesQuery = isTv ? `&type=series&season=${sNum}&episode=${eNum}` : '';
-        const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`);
+        const res = await fetch(`/api/resolve-stream?tmdbId=${tmdbId}&source=1Fmovies${seriesQuery}`);
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.streamUrl) {
             finalItem.url = data.streamUrl;
             finalItem.type = 'hls';
             finalItem.backupUrl = mediaItem.url;
+            if (data.audioTracks && data.audioTracks.length > 0) {
+              finalItem.audioTracks = data.audioTracks;
+            }
           }
         }
       } catch (err) {

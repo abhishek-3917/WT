@@ -337,12 +337,23 @@ export default function SyncedPlayer({
     (media?.id && media?.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/))
   );
 
+  const isFrom7Reels = Boolean(
+    media?.source === '7REELS' || 
+    media?.platform === '7reels' || 
+    media?.type === '7reels' ||
+    media?.id?.toString().startsWith('7reels') || 
+    media?.url?.includes('7reels.cc') || 
+    media?.url?.includes('vidbolt') ||
+    media?.url?.includes('rousav.tech')
+  );
+
   // Direct HLS / Native video streams (rendered in HTML5 synchronized video player)
   const isDirectStream = Boolean(
     resolvedHlsUrl || 
     media?.type === 'hls' || 
     media?.type === 'video' ||
     media?.url?.includes('.m3u8') ||
+    media?.url?.includes('rousav.tech') ||
     media?.url?.includes('media.silverlinehub.org') ||
     (media?.url && (media.url.endsWith('.mp4') || media.url.endsWith('.webm')))
   );
@@ -357,7 +368,6 @@ export default function SyncedPlayer({
     media?.type === 'portal' || 
     media?.url?.includes('1fmovies.live') || 
     media?.url?.includes('7reels.cc') ||
-    media?.url?.includes('vidy.st') ||
     media?.url?.includes('anyembed.xyz')
   );
 
@@ -566,6 +576,9 @@ export default function SyncedPlayer({
 
     if (media?.url?.includes('.m3u8')) {
       setResolvedHlsUrl(media.url);
+      if (media.audioTracks && media.audioTracks.length > 0) {
+        setAudioTracks(media.audioTracks);
+      }
       setIsResolvingStream(false);
       return;
     }
@@ -591,10 +604,19 @@ export default function SyncedPlayer({
       );
       const season = media?.season || 1;
       const episode = media?.episode || 1;
-      const seriesQuery = isTv ? `&type=series&season=${season}&episode=${episode}` : '';
-      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, `S${season}:E${episode}`, 'Source:', media?.source || 'Direct');
+      const is7Reels = Boolean(
+        media?.source === '7REELS' || 
+        media?.platform === '7reels' || 
+        media?.id?.toString().startsWith('7reels') || 
+        media?.url?.includes('7reels') ||
+        media?.url?.includes('vidbolt') ||
+        media?.url?.includes('rousav.tech')
+      );
+      const sourceParam = `&source=${is7Reels ? '7REELS' : '1Fmovies'}`;
+      const seriesQuery = isTv ? `&type=series&season=${season}&episode=${episode}` : '&type=movie';
+      console.log('[Auto-HLS] Resolving direct stream for TMDB', tmdbId, 'isTv:', isTv, `S${season}:E${episode}`, 'Source:', is7Reels ? '7REELS' : '1Fmovies');
       setIsResolvingStream(true);
-      fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}`)
+      fetch(`/api/resolve-stream?tmdbId=${tmdbId}${seriesQuery}${sourceParam}`)
         .then(r => r.json())
         .then(data => {
           if (data.success && data.streamUrl) {
@@ -2550,17 +2572,56 @@ export default function SyncedPlayer({
           {/* Auto-Sync Live Badge & Party Cam Action */}
           <div className="flex items-center space-x-2.5">
             {audioTracks && audioTracks.length > 0 && (
-              <button
-                onClick={() => setShowAudioMenu(prev => !prev)}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 transition cursor-pointer shadow-sm"
-                title="Select Audio Language"
-              >
-                <Languages className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-[11px] font-bold">
-                  {formatLanguageName(audioTracks[currentAudioTrack] || audioTracks[0])}
-                </span>
-                <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowAudioMenu(prev => !prev)}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 transition cursor-pointer shadow-sm"
+                  title="Select Audio Language"
+                >
+                  <Languages className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-[11px] font-bold">
+                    {formatLanguageName(audioTracks[currentAudioTrack] || audioTracks[0])}
+                  </span>
+                  <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+                </button>
+
+                {showAudioMenu && (
+                  <div className="absolute top-full mt-2 right-0 bg-slate-900/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-2 shadow-2xl z-50 min-w-[200px] max-h-72 overflow-y-auto space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2 py-1 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center justify-between border-b border-white/10 pb-1.5 mb-1">
+                      <span className="flex items-center space-x-1">
+                        <Languages className="w-3 h-3 text-indigo-400" />
+                        <span>Select Audio Language</span>
+                      </span>
+                      <span className="text-[9px] text-indigo-300 font-bold bg-indigo-500/20 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                        {audioTracks.length} Available
+                      </span>
+                    </div>
+
+                    <div className="space-y-0.5 custom-scrollbar">
+                      {audioTracks.map((track, idx) => {
+                        const trackId = track.id !== undefined ? track.id : idx;
+                        const isCurrent = currentAudioTrack === trackId || (currentAudioTrack === -1 && idx === 0);
+                        const langLabel = formatLanguageName(track);
+                        return (
+                          <button
+                            key={`top-audio-${trackId}-${idx}`}
+                            onClick={() => handleSelectAudioTrack(trackId)}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer ${
+                              isCurrent ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <span className={`w-1.5 h-1.5 rounded-full ${isCurrent ? 'bg-white' : 'bg-indigo-400'}`} />
+                              <span className="truncate">{langLabel}</span>
+                            </div>
+                            {isCurrent && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             <button

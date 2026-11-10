@@ -435,10 +435,63 @@ app.get('/api/resolve-stream', async (req, res) => {
     return res.status(400).json({ error: 'tmdbId required' });
   }
 
-  const isTv = req.query.type === 'series' || req.query.isTv === 'true';
+  const isTv = req.query.type === 'series' || req.query.type === 'tv' || req.query.isTv === 'true';
   const season = Number(req.query.season) || 1;
   const episode = Number(req.query.episode) || 1;
+  const is7Reels = req.query.source === '7REELS' || req.query.source === '7reels' || req.query.platform === '7reels';
 
+  // 1. If 7REELS source, resolve STRICTLY via 7REELS infrastructure (vidbolt/rousav)
+  if (is7Reels) {
+    const q = isTv ? `type=tv&id=${tmdbId}&season=${season}&episode=${episode}` : `type=movie&id=${tmdbId}`;
+    const boltUrl = `https://vidbolt.xyz/api/resolve?${q}`;
+    try {
+      const boltRes = await fetch(boltUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Referer': `https://vidbolt.xyz/embed/${isTv ? 'tv' : 'movie'}/${tmdbId}`
+        },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (boltRes.ok) {
+        const boltData = await boltRes.json();
+        const primarySource = boltData.stream?.sources?.[0];
+        if (primarySource?.url) {
+          const masterUrl = primarySource.url;
+          let audioTracks = [];
+          const masterContent = primarySource.master || '';
+          if (masterContent.includes('TYPE=AUDIO')) {
+            const audioLines = masterContent.split('\n').filter(l => l.includes('TYPE=AUDIO'));
+            audioTracks = audioLines.map((line, idx) => {
+              const lang = line.match(/LANGUAGE="([^"]+)"/)?.[1] || 'und';
+              const name = line.match(/NAME="([^"]+)"/)?.[1] || `Audio ${idx + 1}`;
+              const isDefault = line.includes('DEFAULT=YES');
+              return { id: idx, lang, name, isDefault };
+            });
+          }
+          console.log(`[7REELS Stream Resolver] Resolved TMDB ${tmdbId} (TV: ${isTv}, S${season}:E${episode}) strictly from 7REELS to direct HLS: ${masterUrl} with ${audioTracks.length} audio tracks`);
+          return res.json({
+            success: true,
+            type: 'hls',
+            source: '7REELS',
+            season,
+            episode,
+            streamUrl: masterUrl,
+            subtitleUrl: boltData.stream?.thumbnails || null,
+            audioTracks
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[7REELS Stream Resolver Error]', err.message);
+    }
+
+    const fallback7reels = isTv 
+      ? `https://7reels.cc/tv/${tmdbId}/watch?s=${season}&e=${episode}`
+      : `https://7reels.cc/movie/${tmdbId}/watch`;
+    return res.json({ success: false, source: '7REELS', fallback: fallback7reels });
+  }
+
+  // 2. Otherwise resolve via 1Fmovies (player.silverlinehub.org)
   const targetUrl = isTv
     ? `https://player.silverlinehub.org/?tmdb_id=${tmdbId}&type=series&season=${season}&episode=${episode}`
     : `https://player.silverlinehub.org/?tmdb_id=${tmdbId}`;
@@ -512,6 +565,7 @@ app.get('/api/resolve-stream', async (req, res) => {
         return res.json({
           success: true,
           type: 'hls',
+          source: '1Fmovies',
           season,
           episode,
           streamUrl: masterUrl,
@@ -639,11 +693,11 @@ app.get('/api/search', async (req, res) => {
                 thumbnail: thumb,
                 backdrop: back,
                 url: isTv 
-                  ? `https://vidy.st/tv/${tmdbId}/1/1?autoplay=true&nextEpisode=true&autoplayNextEpisode=true&episodeSelector=true&overlay=true&color=16A085&quality=2160p` 
-                  : `https://vidy.st/movie/${tmdbId}?autoplay=true&overlay=true&color=16A085&quality=2160p`,
-                backupUrl: isTv 
                   ? `https://7reels.cc/tv/${tmdbId}/watch?s=1&e=1` 
                   : `https://7reels.cc/movie/${tmdbId}/watch`,
+                backupUrl: isTv 
+                  ? `https://vidbolt.xyz/embed/tv/${tmdbId}/1/1` 
+                  : `https://vidbolt.xyz/embed/movie/${tmdbId}`,
                 type: "7reels",
                 platform: '7reels',
                 isTv: isTv,
@@ -1299,14 +1353,57 @@ io.on('connection', (socket) => {
 
     console.log(`[Media Changed] in ${roomId} to "${media.title}" (TV: ${isTv}, S${season}:E${episode}) by ${member?.name}`);
 
-    // If media is a TMDB movie/series and not yet direct HLS, attempt server-side resolution
     const rawTmdbId = media.tmdbId || 
       (media.id && media.id.match(/(?:tmdb|7reels|1fmovies)-(\d+)/)?.[1]) ||
       (media.url?.match(/tmdb_id=(\d+)/)?.[1]) ||
       (media.url?.match(/(?:movie|tv)\/(\d+)/)?.[1]) ||
       (media.backupUrl?.match(/(?:movie|tv)\/(\d+)/)?.[1]);
 
-    if (rawTmdbId && room.media.type !== 'hls' && media.type !== 'platform') {
+    // If media is from 7REELS, resolve and stream strictly from 7REELS ONLY
+    const isFrom7Reels = media.source === '7REELS' || media.platform === '7reels' || media.id?.toString().startsWith('7reels') || media.url?.includes('7reels') || media.url?.includes('vidbolt') || media.url?.includes('rousav.tech');
+
+    if (isFrom7Reels) {
+      console.log(`[7REELS] Preserving genuine 7REELS source for "${room.media.title}" (TV: ${isTv}, S${season}:E${episode})`);
+      room.media.source = '7REELS';
+      room.media.sourceBadge = '7REELS';
+      room.media.sourceDomain = '7reels.cc';
+      room.media.sourceColor = '#e11d48';
+
+      if (rawTmdbId && room.media.type !== 'hls') {
+        const q = isTv ? `type=tv&id=${rawTmdbId}&season=${season || 1}&episode=${episode || 1}` : `type=movie&id=${rawTmdbId}`;
+        fetch(`https://vidbolt.xyz/api/resolve?${q}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Referer': `https://vidbolt.xyz/embed/${isTv ? 'tv' : 'movie'}/${rawTmdbId}`
+          },
+          signal: AbortSignal.timeout(6000)
+        }).then(r => r.json()).then(boltData => {
+          const primarySource = boltData.stream?.sources?.[0];
+          if (primarySource?.url) {
+            room.media.url = primarySource.url;
+            room.media.type = 'hls';
+            room.media.backupUrl = isTv 
+              ? `https://7reels.cc/tv/${rawTmdbId}/watch?s=${season || 1}&e=${episode || 1}`
+              : `https://7reels.cc/movie/${rawTmdbId}/watch`;
+            const masterContent = primarySource.master || '';
+            if (masterContent.includes('TYPE=AUDIO')) {
+              const audioLines = masterContent.split('\n').filter(l => l.includes('TYPE=AUDIO'));
+              room.media.audioTracks = audioLines.map((line, idx) => ({
+                id: idx,
+                lang: line.match(/LANGUAGE="([^"]+)"/)?.[1] || 'und',
+                name: line.match(/NAME="([^"]+)"/)?.[1] || `Audio ${idx + 1}`,
+                isDefault: line.includes('DEFAULT=YES')
+              }));
+            }
+            console.log(`[7REELS Stream Resolved] Converted "${room.media.title}" exclusively from 7REELS to direct HLS: ${primarySource.url} with ${room.media.audioTracks?.length || 0} audio tracks`);
+            io.to(roomId).emit('media_changed', {
+              media: room.media,
+              triggeredBy: member?.name || 'Remote Controller'
+            });
+          }
+        }).catch(err => console.warn('[7REELS Live Resolve error]', err.message));
+      }
+    } else if (rawTmdbId && room.media.type !== 'hls' && media.type !== 'platform') {
       const seriesQuery = isTv ? `&type=series&season=${season || 1}&episode=${episode || 1}` : '';
       const targetUrl = `https://player.silverlinehub.org/?tmdb_id=${rawTmdbId}${seriesQuery}`;
 
